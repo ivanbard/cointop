@@ -15,7 +15,7 @@ import (
 
 // MCPCmd runs the local agent-facing MCP server over stdio.
 func MCPCmd() *cobra.Command {
-	var configPath, providerName, cacheDir string
+	var configPath, providerName, fallbackProvider, cacheDir string
 	var cmcKey, cgKey, cgProKey string
 	var perPage, maxPages uint
 	var freshTTL, maxStale time.Duration
@@ -49,7 +49,7 @@ func MCPCmd() *cobra.Command {
 			if command.Flags().Changed("max-pages") {
 				settings.Provider.MaxPages = maxPages
 			}
-			service, err := newMarketService(settings, marketServiceOptions{FreshTTL: freshTTL, MaxStale: maxStale})
+			service, err := newMarketService(settings, marketServiceOptions{FreshTTL: freshTTL, MaxStale: maxStale, FallbackProvider: fallbackProvider})
 			if err != nil {
 				return err
 			}
@@ -64,6 +64,7 @@ func MCPCmd() *cobra.Command {
 	command.SetOut(os.Stderr)
 	command.Flags().StringVar(&configPath, "config", os.Getenv("COINTOP_CONFIG"), "Cointop config filepath")
 	command.Flags().StringVar(&providerName, "api", "", "Provider: coingecko or coinmarketcap")
+	command.Flags().StringVar(&fallbackProvider, "fallback-api", "", "Secondary provider used only during primary outages")
 	command.Flags().StringVar(&cacheDir, "cache-dir", "", "Cache directory")
 	command.Flags().StringVar(&cmcKey, "coinmarketcap-api-key", "", "CoinMarketCap Pro API key")
 	command.Flags().StringVar(&cgKey, "coingecko-api-key", "", "CoinGecko Demo API key")

@@ -7,8 +7,9 @@ import (
 )
 
 type marketServiceOptions struct {
-	FreshTTL time.Duration
-	MaxStale time.Duration
+	FreshTTL         time.Duration
+	MaxStale         time.Duration
+	FallbackProvider string
 }
 
 func newMarketService(settings daemonSettings, options marketServiceOptions) (*marketdata.Service, error) {
@@ -16,11 +17,22 @@ func newMarketService(settings daemonSettings, options marketServiceOptions) (*m
 	if err != nil {
 		return nil, err
 	}
-	return marketdata.NewService(provider, marketdata.Config{
+	config := marketdata.Config{
 		Provider:      providerID,
 		CacheDir:      settings.CacheDir,
 		FreshTTL:      options.FreshTTL,
 		CurrenciesTTL: 24 * time.Hour,
 		MaxStale:      options.MaxStale,
-	})
+	}
+	if options.FallbackProvider == "" {
+		return marketdata.NewService(provider, config)
+	}
+	fallbackConfig := settings.Provider
+	fallbackConfig.Name = options.FallbackProvider
+	fallback, fallbackID, err := marketdata.NewProvider(fallbackConfig)
+	if err != nil {
+		return nil, err
+	}
+	config.FallbackProvider = fallbackID
+	return marketdata.NewServiceWithFallback(provider, fallback, config)
 }

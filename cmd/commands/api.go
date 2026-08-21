@@ -18,7 +18,7 @@ import (
 )
 
 func APICmd() *cobra.Command {
-	var listen, configPath, providerName, cacheDir string
+	var listen, configPath, providerName, fallbackProvider, cacheDir string
 	var cmcKey, cgKey, cgProKey string
 	var perPage, maxPages uint
 	var freshTTL, maxStale time.Duration
@@ -57,7 +57,7 @@ func APICmd() *cobra.Command {
 				settings.Provider.MaxPages = maxPages
 			}
 
-			service, err := newMarketService(settings, marketServiceOptions{FreshTTL: freshTTL, MaxStale: maxStale})
+			service, err := newMarketService(settings, marketServiceOptions{FreshTTL: freshTTL, MaxStale: maxStale, FallbackProvider: fallbackProvider})
 			if err != nil {
 				return err
 			}
@@ -98,6 +98,7 @@ func APICmd() *cobra.Command {
 	command.Flags().StringVar(&listen, "listen", "127.0.0.1:7070", "Loopback address for the HTTP API")
 	command.Flags().StringVar(&configPath, "config", os.Getenv("COINTOP_CONFIG"), "Cointop config filepath")
 	command.Flags().StringVar(&providerName, "api", "", "Provider: coingecko or coinmarketcap")
+	command.Flags().StringVar(&fallbackProvider, "fallback-api", "", "Secondary provider used only during primary outages")
 	command.Flags().StringVar(&cacheDir, "cache-dir", "", "Cache directory")
 	command.Flags().StringVar(&cmcKey, "coinmarketcap-api-key", "", "CoinMarketCap Pro API key")
 	command.Flags().StringVar(&cgKey, "coingecko-api-key", "", "CoinGecko Demo API key")
