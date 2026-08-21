@@ -255,3 +255,14 @@ func TestChartRangesCacheAndStaleFallback(t *testing.T) {
 		t.Fatalf("expected invalid range, got %v", err)
 	}
 }
+
+func TestAllChartRangeStartsAtEpoch(t *testing.T) {
+	now := time.Date(2026, 8, 21, 1, 0, 0, 0, time.UTC)
+	rangeID, start, end, err := chartWindow("all", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rangeID != "all" || start.Unix() != 0 || !end.Equal(now) {
+		t.Fatalf("range=%s start=%s end=%s", rangeID, start, end)
+	}
+}

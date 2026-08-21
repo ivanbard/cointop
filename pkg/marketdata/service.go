@@ -251,7 +251,7 @@ func chartWindow(value string, now time.Time) (string, time.Time, time.Time, err
 	case "1y":
 		start = now.AddDate(-1, 0, 0)
 	case "all":
-		start = now.AddDate(-10, 0, 0)
+		start = time.Unix(0, 0).UTC()
 	default:
 		return "", time.Time{}, time.Time{}, fmt.Errorf("%w: unsupported range", ErrInvalidInput)
 	}
