@@ -22,6 +22,8 @@ type Reader interface {
 	Coin(context.Context, string, string) (marketdata.Result, error)
 	Global(context.Context, string) (marketdata.Result, error)
 	Currencies(context.Context) (marketdata.Result, error)
+	CoinHistory(context.Context, string, string, string) (marketdata.Result, error)
+	GlobalHistory(context.Context, string, string) (marketdata.Result, error)
 }
 
 type PricesInput struct {
@@ -41,6 +43,15 @@ type GlobalInput struct {
 	Currency string `json:"currency,omitempty" jsonschema:"conversion currency, defaults to USD"`
 }
 type CurrencyInput struct{}
+type HistoryInput struct {
+	Identifier string `json:"identifier" jsonschema:"provider coin ID, name, or symbol"`
+	Currency   string `json:"currency,omitempty" jsonschema:"conversion currency, defaults to USD"`
+	Range      string `json:"range,omitempty" jsonschema:"24h, 3d, 7d, 1m, 3m, 6m, ytd, 1y, or all"`
+}
+type GlobalHistoryInput struct {
+	Currency string `json:"currency,omitempty"`
+	Range    string `json:"range,omitempty"`
+}
 
 type PricesOutput struct {
 	Data []marketdata.Price `json:"data"`
@@ -61,6 +72,14 @@ type GlobalOutput struct {
 type CurrenciesOutput struct {
 	Data []string        `json:"data"`
 	Meta marketdata.Meta `json:"meta"`
+}
+type CoinHistoryOutput struct {
+	Data marketdata.CoinHistory `json:"data"`
+	Meta marketdata.Meta        `json:"meta"`
+}
+type GlobalHistoryOutput struct {
+	Data marketdata.GlobalHistory `json:"data"`
+	Meta marketdata.Meta          `json:"meta"`
 }
 
 func boolPtr(v bool) *bool { return &v }
@@ -144,6 +163,28 @@ func NewServer(reader Reader, version string) *mcp.Server {
 		}
 		return nil, CurrenciesOutput{Data: data, Meta: result.Meta}, nil
 	})
+	mcp.AddTool(s, tool("get_coin_history", "Get cached historical series for one coin."), func(ctx context.Context, _ *mcp.CallToolRequest, in HistoryInput) (*mcp.CallToolResult, CoinHistoryOutput, error) {
+		result, err := reader.CoinHistory(ctx, in.Identifier, in.Currency, in.Range)
+		if err != nil {
+			return nil, CoinHistoryOutput{}, safeError(err)
+		}
+		var data marketdata.CoinHistory
+		if err := convert(result.Data, &data); err != nil {
+			return nil, CoinHistoryOutput{}, safeError(err)
+		}
+		return nil, CoinHistoryOutput{Data: data, Meta: result.Meta}, nil
+	})
+	mcp.AddTool(s, tool("get_global_history", "Get cached historical global-market series."), func(ctx context.Context, _ *mcp.CallToolRequest, in GlobalHistoryInput) (*mcp.CallToolResult, GlobalHistoryOutput, error) {
+		result, err := reader.GlobalHistory(ctx, in.Currency, in.Range)
+		if err != nil {
+			return nil, GlobalHistoryOutput{}, safeError(err)
+		}
+		var data marketdata.GlobalHistory
+		if err := convert(result.Data, &data); err != nil {
+			return nil, GlobalHistoryOutput{}, safeError(err)
+		}
+		return nil, GlobalHistoryOutput{Data: data, Meta: result.Meta}, nil
+	})
 	registerResources(s, reader)
 	return s
 }
@@ -166,6 +207,8 @@ func registerResources(s *mcp.Server, reader Reader) {
 		{Name: "prices", URITemplate: "cointop://prices/{coins}{?currency}", MIMEType: "application/json", Description: "Current prices for comma-separated coins."},
 		{Name: "coin", URITemplate: "cointop://coins/{identifier}{?currency}", MIMEType: "application/json", Description: "Details for one coin."},
 		{Name: "global-market", URITemplate: "cointop://market/global{?currency}", MIMEType: "application/json", Description: "Global market totals."},
+		{Name: "coin-history", URITemplate: "cointop://charts/coins/{identifier}{?currency,range}", MIMEType: "application/json", Description: "Historical series for one coin."},
+		{Name: "global-history", URITemplate: "cointop://charts/global{?currency,range}", MIMEType: "application/json", Description: "Historical global market series."},
 	} {
 		s.AddResourceTemplate(template, h)
 	}
@@ -192,6 +235,15 @@ func resourceHandler(reader Reader) mcp.ResourceHandler {
 				return nil, mcp.ResourceNotFoundError(raw)
 			}
 			result, err = reader.Global(ctx, currency)
+		case "charts":
+			path := strings.TrimPrefix(u.Path, "/")
+			if strings.HasPrefix(path, "coins/") {
+				result, err = reader.CoinHistory(ctx, strings.TrimPrefix(path, "coins/"), currency, u.Query().Get("range"))
+			} else if path == "global" {
+				result, err = reader.GlobalHistory(ctx, currency, u.Query().Get("range"))
+			} else {
+				return nil, mcp.ResourceNotFoundError(raw)
+			}
 		default:
 			return nil, mcp.ResourceNotFoundError(raw)
 		}

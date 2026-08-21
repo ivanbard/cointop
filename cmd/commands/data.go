@@ -24,7 +24,34 @@ func DataCmd() *cobra.Command {
 		dataPricesCmd(&endpoint, &timeout), dataCoinsCmd(&endpoint, &timeout),
 		dataCoinCmd(&endpoint, &timeout), dataGlobalCmd(&endpoint, &timeout),
 		dataCurrenciesCmd(&endpoint, &timeout),
+		dataChartCmd(&endpoint, &timeout),
 	)
+	return command
+}
+
+func dataChartCmd(endpoint *string, timeout *time.Duration) *cobra.Command {
+	command := &cobra.Command{Use: "chart", Short: "Get cached historical chart data"}
+	command.AddCommand(dataCoinChartCmd(endpoint, timeout), dataGlobalChartCmd(endpoint, timeout))
+	return command
+}
+
+func dataCoinChartCmd(endpoint *string, timeout *time.Duration) *cobra.Command {
+	var currency, chartRange string
+	command := &cobra.Command{Use: "coin <identifier>", Short: "Get coin history", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		return requestData(cmd, *endpoint, "/v1/charts/coins/"+url.PathEscape(args[0]), url.Values{"currency": {currency}, "range": {chartRange}}, *timeout)
+	}}
+	command.Flags().StringVar(&currency, "currency", "USD", "Conversion currency")
+	command.Flags().StringVar(&chartRange, "range", "24h", "Range: 24h, 3d, 7d, 1m, 3m, 6m, ytd, 1y, or all")
+	return command
+}
+
+func dataGlobalChartCmd(endpoint *string, timeout *time.Duration) *cobra.Command {
+	var currency, chartRange string
+	command := &cobra.Command{Use: "global", Short: "Get global market history", RunE: func(cmd *cobra.Command, _ []string) error {
+		return requestData(cmd, *endpoint, "/v1/charts/global", url.Values{"currency": {currency}, "range": {chartRange}}, *timeout)
+	}}
+	command.Flags().StringVar(&currency, "currency", "USD", "Conversion currency")
+	command.Flags().StringVar(&chartRange, "range", "24h", "Range: 24h, 3d, 7d, 1m, 3m, 6m, ytd, 1y, or all")
 	return command
 }
 

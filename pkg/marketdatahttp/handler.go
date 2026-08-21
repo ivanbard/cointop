@@ -33,6 +33,8 @@ func NewHandler(service *marketdata.Service) http.Handler {
 	h.mux.HandleFunc("/v1/coins/", h.coin)
 	h.mux.HandleFunc("/v1/global", h.global)
 	h.mux.HandleFunc("/v1/currencies", h.currencies)
+	h.mux.HandleFunc("/v1/charts/coins/", h.coinHistory)
+	h.mux.HandleFunc("/v1/charts/global", h.globalHistory)
 	h.mux.HandleFunc("/", h.notFound)
 	return h
 }
@@ -124,6 +126,27 @@ func (h *Handler) currencies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := h.service.Currencies(r.Context())
+	writeResult(w, result, err)
+}
+
+func (h *Handler) coinHistory(w http.ResponseWriter, r *http.Request) {
+	if !getOnly(w, r) {
+		return
+	}
+	identifier, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/v1/charts/coins/"))
+	if err != nil || strings.TrimSpace(identifier) == "" {
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		return
+	}
+	result, serviceErr := h.service.CoinHistory(r.Context(), identifier, r.URL.Query().Get("currency"), r.URL.Query().Get("range"))
+	writeResult(w, result, serviceErr)
+}
+
+func (h *Handler) globalHistory(w http.ResponseWriter, r *http.Request) {
+	if !getOnly(w, r) {
+		return
+	}
+	result, err := h.service.GlobalHistory(r.Context(), r.URL.Query().Get("currency"), r.URL.Query().Get("range"))
 	writeResult(w, result, err)
 }
 

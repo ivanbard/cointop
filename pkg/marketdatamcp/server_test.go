@@ -55,6 +55,12 @@ func (f fakeReader) Global(context.Context, string) (marketdata.Result, error) {
 func (f fakeReader) Currencies(context.Context) (marketdata.Result, error) {
 	return f.result([]string{"BTC", "USD"}, "")
 }
+func (f fakeReader) CoinHistory(context.Context, string, string, string) (marketdata.Result, error) {
+	return f.result(marketdata.CoinHistory{ID: "bitcoin", Range: "24h", Series: apitypes.CoinGraph{Price: [][]float64{{1, 42}}}}, "USD")
+}
+func (f fakeReader) GlobalHistory(context.Context, string, string) (marketdata.Result, error) {
+	return f.result(marketdata.GlobalHistory{Range: "24h", Series: apitypes.MarketGraph{MarketCapByAvailableSupply: [][]float64{{1, 100}}}}, "USD")
+}
 
 func connectTestClient(t *testing.T, reader Reader) *mcp.ClientSession {
 	t.Helper()
@@ -79,7 +85,7 @@ func TestDiscoveryAndStructuredToolResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 5 {
+	if len(tools.Tools) != 7 {
 		t.Fatalf("got %d tools", len(tools.Tools))
 	}
 	for _, item := range tools.Tools {

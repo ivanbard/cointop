@@ -78,6 +78,24 @@ func TestHealthAndJSONNotFound(t *testing.T) {
 	}
 }
 
+func TestChartRoutesAndRangeValidation(t *testing.T) {
+	handler := newTestHandler(t)
+	for _, tc := range []struct {
+		path   string
+		status int
+	}{
+		{"/v1/charts/coins/bitcoin?currency=USD&range=7d", http.StatusOK},
+		{"/v1/charts/global?currency=USD&range=ytd", http.StatusOK},
+		{"/v1/charts/global?range=2y", http.StatusBadRequest},
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if recorder.Code != tc.status {
+			t.Fatalf("%s: expected %d got %d: %s", tc.path, tc.status, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
 func TestCoinsPaginationAndValidation(t *testing.T) {
 	handler := newTestHandler(t)
 	recorder := httptest.NewRecorder()
