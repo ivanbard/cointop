@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cointop-sh/cointop/pkg/api"
+	localapi "github.com/cointop-sh/cointop/pkg/api/impl/local"
 	"github.com/cointop-sh/cointop/pkg/api/types"
 	"github.com/cointop-sh/cointop/pkg/cache"
 	"github.com/cointop-sh/cointop/pkg/filecache"
@@ -164,6 +165,7 @@ type PriceAlerts struct {
 // Config config options
 type Config struct {
 	APIChoice             string
+	Endpoint              string
 	CacheDir              string
 	ColorsDir             string
 	Colorscheme           string
@@ -418,7 +420,7 @@ func NewCointop(config *Config) (*Cointop, error) {
 		}
 	}
 
-	if ct.apiChoice == CoinMarketCap && ct.apiKeys.cmc == "" {
+	if config.Endpoint == "" && ct.apiChoice == CoinMarketCap && ct.apiKeys.cmc == "" {
 		apiKey := os.Getenv("CMC_PRO_API_KEY")
 		if apiKey == "" {
 			if !config.NoPrompts {
@@ -438,7 +440,7 @@ func NewCointop(config *Config) (*Cointop, error) {
 		}
 	}
 
-	if ct.apiChoice == CoinGecko && ct.apiKeys.coingecko == "" {
+	if config.Endpoint == "" && ct.apiChoice == CoinGecko && ct.apiKeys.coingecko == "" {
 		apiKey := os.Getenv("COINGECKO_API_KEY")
 		if apiKey == "" {
 			// if !config.NoPrompts {
@@ -458,7 +460,7 @@ func NewCointop(config *Config) (*Cointop, error) {
 		}
 	}
 
-	if ct.apiChoice == CoinGecko && ct.apiKeys.coingeckoPro == "" {
+	if config.Endpoint == "" && ct.apiChoice == CoinGecko && ct.apiKeys.coingeckoPro == "" {
 		apiKey := os.Getenv("COINGECKO_PRO_API_KEY")
 		if apiKey == "" {
 			// if !config.NoPrompts {
@@ -478,7 +480,13 @@ func NewCointop(config *Config) (*Cointop, error) {
 		}
 	}
 
-	if ct.apiChoice == CoinMarketCap {
+	if config.Endpoint != "" {
+		client, localErr := localapi.New(config.Endpoint)
+		if localErr != nil {
+			return nil, localErr
+		}
+		ct.api = client
+	} else if ct.apiChoice == CoinMarketCap {
 		ct.api = api.NewCMC(ct.apiKeys.cmc)
 	} else if ct.apiChoice == CoinGecko {
 		ct.api = api.NewCG(&api.CoinGeckoConfig{
