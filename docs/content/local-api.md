@@ -51,6 +51,21 @@ cointop data chart coin bitcoin --range 7d --currency USD
 cointop data chart global --range ytd --currency USD
 ```
 
+## Share the daemon with the TUI
+
+Direct-provider mode remains the default. To make one or more TUI processes
+share the daemon's credentials, snapshots, and in-memory request coalescing,
+start the daemon and pass an explicit loopback endpoint:
+
+```bash
+cointop api
+cointop --endpoint http://127.0.0.1:7070
+```
+
+The TUI does not silently fall back to a provider when the daemon is
+unavailable. Full coin lists are paginated through REST, and charts, global
+data, exchange rates, coin links, and prices all use the daemon adapter.
+
 ## Query with other tools
 
 curl:
@@ -102,6 +117,8 @@ GET /v1/global?currency=USD
 GET /v1/currencies
 GET /v1/charts/coins/{identifier}?currency=USD&range=7d
 GET /v1/charts/global?currency=USD&range=ytd
+GET /v1/exchange-rate?from=BTC&to=USD
+GET /v1/links/coins/{identifier}
 ```
 
 The complete wire contract is maintained in `docs/openapi.yaml`.

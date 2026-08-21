@@ -82,6 +82,24 @@ paths:
         "200": {$ref: "#/components/responses/Success"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/exchange-rate:
+    get:
+      operationId: exchangeRate
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: string}}
+        - {name: to, in: query, required: true, schema: {type: string}}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/links/coins/{identifier}:
+    get:
+      operationId: coinLink
+      parameters:
+        - {name: identifier, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/NotFound"}
 components:
   parameters:
     Coins:
