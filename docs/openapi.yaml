@@ -159,6 +159,8 @@ components:
       required: [provider, fetchedAt, expiresAt, cacheStatus, stale]
       properties:
         provider: {type: string, enum: [coingecko, coinmarketcap]}
+        primaryProvider: {type: string, enum: [coingecko, coinmarketcap]}
+        fallbackUsed: {type: boolean}
         currency: {type: string}
         fetchedAt: {type: string, format: date-time}
         expiresAt: {type: string, format: date-time}

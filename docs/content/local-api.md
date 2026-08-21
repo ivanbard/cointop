@@ -36,6 +36,22 @@ Historical chart responses are fresh for five minutes and use the same
 24-hour stale fallback. They cache the provider's historical response; cointop
 does not create a locally sampled time-series database.
 
+## Optional provider fallback
+
+Configure one ordered secondary provider at process startup:
+
+```bash
+cointop api --api coingecko --fallback-api coinmarketcap
+cointop mcp --api coingecko --fallback-api coinmarketcap
+```
+
+Fallback occurs only after upstream unavailability, timeout, or rate limiting.
+Invalid input and coin-not-found results never trigger it. Values are never
+merged or averaged. `meta.provider` names the provider that answered,
+`meta.primaryProvider` names the configured primary, and `meta.fallbackUsed`
+makes the switch explicit. Cache snapshots remain separated by actual provider.
+CoinMarketCap still requires its configured API key when used as a fallback.
+
 ## Query with cointop
 
 The `data` commands call the running daemon and always write its JSON response

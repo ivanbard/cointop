@@ -94,3 +94,7 @@ Run `cointop mcp --expose-portfolio` to register `get_portfolio` and
 environment-variable opt-in. Without the flag, MCP discovery does not reveal
 that the portfolio capability exists. Portfolio arguments, quantities, and
 results are never logged.
+
+Use `--fallback-api` with either `cointop mcp` or `cointop api` to configure one
+ordered secondary provider. Fallback results carry explicit provider provenance
+in `meta`; cointop never combines provider values.
