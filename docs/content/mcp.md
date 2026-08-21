@@ -67,8 +67,8 @@ It is intentionally unavailable on non-loopback listeners.
 
 ## Tools and resources
 
-The initial tools are `get_prices`, `list_coins`, `get_coin`,
-`get_global_market`, and `list_currencies`. Every tool is annotated read-only,
+The tools are `get_prices`, `list_coins`, `get_coin`, `get_global_market`,
+`list_currencies`, `get_coin_history`, and `get_global_history`. Every tool is annotated read-only,
 idempotent, non-destructive, and open-world. Results contain typed structured
 content plus serialized JSON text for compatibility.
 
@@ -79,6 +79,8 @@ cointop://currencies
 cointop://prices/{coins}{?currency}
 cointop://coins/{identifier}{?currency}
 cointop://market/global{?currency}
+cointop://charts/coins/{identifier}{?currency,range}
+cointop://charts/global{?currency,range}
 ```
 
 Stale snapshots remain successful results with `meta.stale=true`. Invalid

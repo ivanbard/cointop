@@ -32,6 +32,9 @@ Prices, coins, and global data are fresh for 60 seconds by default. Supported
 currencies are fresh for 24 hours. When an upstream refresh fails, cointop may
 return the last snapshot for up to 24 additional hours with `stale: true` and
 `cacheStatus: "stale"` in the response metadata.
+Historical chart responses are fresh for five minutes and use the same
+24-hour stale fallback. They cache the provider's historical response; cointop
+does not create a locally sampled time-series database.
 
 ## Query with cointop
 
@@ -44,6 +47,8 @@ cointop data coins --limit 100 --offset 0 --currency USD
 cointop data coin bitcoin --currency USD
 cointop data global --currency USD
 cointop data currencies
+cointop data chart coin bitcoin --range 7d --currency USD
+cointop data chart global --range ytd --currency USD
 ```
 
 ## Query with other tools
@@ -95,6 +100,8 @@ GET /v1/coins?currency=USD&limit=100&offset=0
 GET /v1/coins/{identifier}?currency=USD
 GET /v1/global?currency=USD
 GET /v1/currencies
+GET /v1/charts/coins/{identifier}?currency=USD&range=7d
+GET /v1/charts/global?currency=USD&range=ytd
 ```
 
 The complete wire contract is maintained in `docs/openapi.yaml`.
@@ -104,5 +111,5 @@ The complete wire contract is maintained in `docs/openapi.yaml`.
 - Coin identifiers are provider-specific.
 - The API is read-only and accessible only from the same machine.
 - The cache stores latest snapshots, not a locally sampled time series.
-- Charts, portfolios, streaming, MCP, provider failover, and LAN access are not
-  part of version 1.
+- Portfolio access, streaming, provider failover, and LAN access are not part
+  of the core market-data release.

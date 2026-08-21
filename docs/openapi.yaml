@@ -60,6 +60,28 @@ paths:
       operationId: currencies
       responses:
         "200": {$ref: "#/components/responses/Success"}
+  /v1/charts/coins/{identifier}:
+    get:
+      operationId: coinHistory
+      parameters:
+        - {name: identifier, in: path, required: true, schema: {type: string}}
+        - {$ref: "#/components/parameters/Currency"}
+        - {$ref: "#/components/parameters/Range"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/charts/global:
+    get:
+      operationId: globalHistory
+      parameters:
+        - {$ref: "#/components/parameters/Currency"}
+        - {$ref: "#/components/parameters/Range"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "503": {$ref: "#/components/responses/Unavailable"}
 components:
   parameters:
     Coins:
@@ -72,6 +94,10 @@ components:
       name: currency
       in: query
       schema: {type: string, default: USD}
+    Range:
+      name: range
+      in: query
+      schema: {type: string, default: 24h, enum: [24h, 3d, 7d, 1m, 3m, 6m, ytd, 1y, all]}
   responses:
     Success:
       description: Normalized market data.
