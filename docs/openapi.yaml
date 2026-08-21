@@ -100,6 +100,16 @@ paths:
       responses:
         "200": {$ref: "#/components/responses/Success"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /v1/portfolio:
+    get:
+      operationId: portfolio
+      description: Available only while the daemon runs with --expose-portfolio.
+      parameters:
+        - {$ref: "#/components/parameters/Currency"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "503": {$ref: "#/components/responses/Unavailable"}
 components:
   parameters:
     Coins:

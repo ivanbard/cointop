@@ -86,3 +86,11 @@ cointop://charts/global{?currency,range}
 Stale snapshots remain successful results with `meta.stale=true`. Invalid
 input, missing coins, and provider outages return stable messages without
 including credentials or upstream response details.
+
+## Private portfolio opt-in
+
+Run `cointop mcp --expose-portfolio` to register `get_portfolio` and
+`cointop://portfolio` for that process only. There is no persistent or
+environment-variable opt-in. Without the flag, MCP discovery does not reveal
+that the portfolio capability exists. Portfolio arguments, quantities, and
+results are never logged.

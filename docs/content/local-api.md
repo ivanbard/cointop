@@ -66,6 +66,21 @@ The TUI does not silently fall back to a provider when the daemon is
 unavailable. Full coin lists are paginated through REST, and charts, global
 data, exchange rates, coin links, and prices all use the daemon adapter.
 
+## Explicit portfolio access
+
+Portfolio data is undiscoverable by default. It cannot be enabled in TOML or
+with an environment variable. Opt in only for the lifetime of a process:
+
+```bash
+cointop api --expose-portfolio
+cointop data portfolio --currency USD
+```
+
+When enabled, `GET /v1/portfolio` returns holdings, quantities, balances,
+allocation, cost basis, and profit/loss using the same market-data freshness
+metadata. Request logs never include portfolio results or quantities. Without
+the flag the route returns `404`.
+
 ## Query with other tools
 
 curl:
@@ -119,6 +134,7 @@ GET /v1/charts/coins/{identifier}?currency=USD&range=7d
 GET /v1/charts/global?currency=USD&range=ytd
 GET /v1/exchange-rate?from=BTC&to=USD
 GET /v1/links/coins/{identifier}
+GET /v1/portfolio?currency=USD
 ```
 
 The complete wire contract is maintained in `docs/openapi.yaml`.
@@ -128,5 +144,5 @@ The complete wire contract is maintained in `docs/openapi.yaml`.
 - Coin identifiers are provider-specific.
 - The API is read-only and accessible only from the same machine.
 - The cache stores latest snapshots, not a locally sampled time series.
-- Portfolio access, streaming, provider failover, and LAN access are not part
-  of the core market-data release.
+- Streaming, provider failover, and LAN access are not part of the core
+  market-data release.
