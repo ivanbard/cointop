@@ -98,3 +98,9 @@ results are never logged.
 Use `--fallback-api` with either `cointop mcp` or `cointop api` to configure one
 ordered secondary provider. Fallback results carry explicit provider provenance
 in `meta`; cointop never combines provider values.
+
+Clients that negotiate MCP resource subscriptions may subscribe to canonical
+price URIs such as `cointop://prices/btc,eth?currency=USD`. Cointop advertises
+subscription support and emits `resources/updated` after a newly fetched price
+snapshot. Cache hits do not generate updates. MCP subscriptions and REST SSE
+both remain loopback-only and share the same cache policy.

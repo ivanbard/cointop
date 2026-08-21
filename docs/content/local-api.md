@@ -52,6 +52,22 @@ merged or averaged. `meta.provider` names the provider that answered,
 makes the switch explicit. Cache snapshots remain separated by actual provider.
 CoinMarketCap still requires its configured API key when used as a fallback.
 
+## Price streams
+
+Loopback clients can subscribe to up to 100 coins with Server-Sent Events:
+
+```bash
+curl -N "http://127.0.0.1:7070/v1/stream/prices?coins=btc,eth&currency=USD&interval=30s"
+```
+
+Intervals range from 15 seconds to one hour and default to 60 seconds. `prices`
+events contain the standard result envelope; heartbeat comments keep idle
+connections alive. Transient failures produce safe `error` events without
+closing the stream, and acceptable stale snapshots remain normal `prices`
+events with `meta.stale=true`. Disconnecting releases the stream immediately.
+All subscribers use the shared cache, so a stream never refreshes upstream data
+more frequently than the configured cache policy.
+
 ## Query with cointop
 
 The `data` commands call the running daemon and always write its JSON response
@@ -151,6 +167,7 @@ GET /v1/charts/global?currency=USD&range=ytd
 GET /v1/exchange-rate?from=BTC&to=USD
 GET /v1/links/coins/{identifier}
 GET /v1/portfolio?currency=USD
+GET /v1/stream/prices?coins=btc,eth&currency=USD&interval=60s
 ```
 
 The complete wire contract is maintained in `docs/openapi.yaml`.
@@ -160,5 +177,4 @@ The complete wire contract is maintained in `docs/openapi.yaml`.
 - Coin identifiers are provider-specific.
 - The API is read-only and accessible only from the same machine.
 - The cache stores latest snapshots, not a locally sampled time series.
-- Streaming, provider failover, and LAN access are not part of the core
-  market-data release.
+- LAN access and a locally sampled time-series database are not included.

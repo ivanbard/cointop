@@ -110,6 +110,21 @@ paths:
         "200": {$ref: "#/components/responses/Success"}
         "404": {$ref: "#/components/responses/NotFound"}
         "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/stream/prices:
+    get:
+      operationId: streamPrices
+      description: Loopback Server-Sent Events stream of cached price envelopes.
+      parameters:
+        - {$ref: "#/components/parameters/Coins"}
+        - {$ref: "#/components/parameters/Currency"}
+        - {name: interval, in: query, schema: {type: string, default: 60s, example: 30s}}
+      responses:
+        "200":
+          description: A stream of prices events, safe error events, and heartbeat comments.
+          content:
+            text/event-stream:
+              schema: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
 components:
   parameters:
     Coins:
