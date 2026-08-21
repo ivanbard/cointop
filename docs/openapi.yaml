@@ -1,0 +1,122 @@
+openapi: 3.0.3
+info:
+  title: Cointop Local Market Data API
+  version: 1.0.0
+  description: Read-only, loopback-only normalized cryptocurrency market data.
+servers:
+  - url: http://127.0.0.1:7070
+paths:
+  /v1/health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          description: Daemon readiness without an upstream request.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Envelope"}
+  /v1/prices:
+    get:
+      operationId: prices
+      parameters:
+        - {$ref: "#/components/parameters/Coins"}
+        - {$ref: "#/components/parameters/Currency"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/coins:
+    get:
+      operationId: coins
+      parameters:
+        - {$ref: "#/components/parameters/Currency"}
+        - {name: limit, in: query, schema: {type: integer, default: 100, minimum: 1, maximum: 500}}
+        - {name: offset, in: query, schema: {type: integer, default: 0, minimum: 0}}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/coins/{identifier}:
+    get:
+      operationId: coin
+      parameters:
+        - {name: identifier, in: path, required: true, schema: {type: string}}
+        - {$ref: "#/components/parameters/Currency"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/global:
+    get:
+      operationId: globalMarket
+      parameters:
+        - {$ref: "#/components/parameters/Currency"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/currencies:
+    get:
+      operationId: currencies
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+components:
+  parameters:
+    Coins:
+      name: coins
+      in: query
+      required: true
+      description: Comma-separated provider coin names, symbols, or identifiers.
+      schema: {type: string, example: "btc,eth"}
+    Currency:
+      name: currency
+      in: query
+      schema: {type: string, default: USD}
+  responses:
+    Success:
+      description: Normalized market data.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Envelope"}
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotFound:
+      description: Coin or resource not found.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Unavailable:
+      description: Provider unavailable and no acceptable stale snapshot exists.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+  schemas:
+    Envelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data: {}
+        meta: {$ref: "#/components/schemas/Meta"}
+    Meta:
+      type: object
+      required: [provider, fetchedAt, expiresAt, cacheStatus, stale]
+      properties:
+        provider: {type: string, enum: [coingecko, coinmarketcap]}
+        currency: {type: string}
+        fetchedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        cacheStatus: {type: string, enum: [miss, hit, stale]}
+        stale: {type: boolean}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}

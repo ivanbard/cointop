@@ -3,7 +3,9 @@ builds:
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
+      - arm64
     ldflags:
      - -X github.com/cointop-sh/cointop/cointop.version={{.Env.VERSION}}
