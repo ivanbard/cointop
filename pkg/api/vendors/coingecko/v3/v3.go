@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"os"
 
@@ -26,7 +27,7 @@ type Client struct {
 // NewClient create new client object
 func NewClient(httpClient *http.Client, apiKey string, proApiKey string) *Client {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
 	return &Client{httpClient: httpClient, apiKey: apiKey, proApiKey: proApiKey}
 }

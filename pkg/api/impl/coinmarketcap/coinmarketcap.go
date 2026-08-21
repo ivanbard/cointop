@@ -126,7 +126,7 @@ func (s *Service) GetCoinData(name string, convert string) (apitypes.Coin, error
 	}
 
 	for _, coin := range coins {
-		if coin.Name == name {
+		if matchesCoinIdentifier(coin, name) {
 			return coin, nil
 		}
 	}
@@ -144,7 +144,7 @@ func (s *Service) GetCoinDataBatch(names []string, convert string) ([]apitypes.C
 
 	for _, coin := range coins {
 		for _, name := range names {
-			if coin.Name == name {
+			if matchesCoinIdentifier(coin, name) {
 				ret = append(ret, coin)
 				break
 			}
@@ -152,6 +152,14 @@ func (s *Service) GetCoinDataBatch(names []string, convert string) ([]apitypes.C
 	}
 
 	return ret, nil
+}
+
+func matchesCoinIdentifier(coin apitypes.Coin, identifier string) bool {
+	identifier = strings.TrimSpace(identifier)
+	return strings.EqualFold(coin.ID, identifier) ||
+		strings.EqualFold(coin.Name, identifier) ||
+		strings.EqualFold(coin.Symbol, identifier) ||
+		strings.EqualFold(coin.Slug, identifier)
 }
 
 // GetCoinGraphData gets coin graph data
@@ -380,7 +388,7 @@ func (s *Service) SupportedCurrencies() []string {
 
 // doReq does HTTP request with client
 func doReq(req *http.Request) ([]byte, error) {
-	client := &http.Client{}
+	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
