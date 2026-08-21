@@ -8,7 +8,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cointop-sh/cointop/cointop"
 	"github.com/cointop-sh/cointop/pkg/marketdatahttp"
+	"github.com/cointop-sh/cointop/pkg/marketdatamcp"
 	"github.com/cointop-sh/cointop/pkg/pathutil"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -61,8 +63,11 @@ func APICmd() *cobra.Command {
 			logger := log.New()
 			logger.SetOutput(cmd.ErrOrStderr())
 			logger.SetFormatter(&log.JSONFormatter{})
+			mux := http.NewServeMux()
+			mux.Handle("/mcp", marketdatamcp.NewHTTPHandler(service, cointop.Version()))
+			mux.Handle("/", marketdatahttp.NewHandler(service))
 			server := &http.Server{
-				Addr: listen, Handler: marketdatahttp.WithRequestLogging(marketdatahttp.NewHandler(service), logger),
+				Addr: listen, Handler: marketdatahttp.WithRequestLogging(mux, logger),
 				ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
 				WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 			}

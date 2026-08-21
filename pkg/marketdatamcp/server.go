@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -145,6 +146,17 @@ func NewServer(reader Reader, version string) *mcp.Server {
 	})
 	registerResources(s, reader)
 	return s
+}
+
+// NewHTTPHandler exposes the same server contract over stateless Streamable HTTP.
+func NewHTTPHandler(reader Reader, version string) http.Handler {
+	server := NewServer(reader, version)
+	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
+		Stateless:                    true,
+		JSONResponse:                 true,
+		MaxRequestBodyBytes:          1 << 20,
+		PropagateRequestCancellation: true,
+	})
 }
 
 func registerResources(s *mcp.Server, reader Reader) {

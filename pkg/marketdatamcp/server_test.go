@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -20,6 +21,24 @@ func (f fakeReader) result(data any, currency string) (marketdata.Result, error)
 	}
 	now := time.Date(2026, 8, 21, 1, 0, 0, 0, time.UTC)
 	return marketdata.Result{Data: data, Meta: marketdata.Meta{Provider: "fake", Currency: currency, FetchedAt: now, ExpiresAt: now.Add(time.Minute), CacheStatus: "hit"}}, nil
+}
+
+func TestStreamableHTTP(t *testing.T) {
+	httpServer := httptest.NewServer(NewHTTPHandler(fakeReader{}, "vtest"))
+	defer httpServer.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "vtest"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_global_market", Arguments: map[string]any{"currency": "USD"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || result.StructuredContent == nil {
+		t.Fatalf("unexpected result: %#v", result)
+	}
 }
 func (f fakeReader) Prices(context.Context, []string, string) (marketdata.Result, error) {
 	return f.result([]marketdata.Price{{ID: "bitcoin", Symbol: "BTC", Price: 42}}, "USD")
