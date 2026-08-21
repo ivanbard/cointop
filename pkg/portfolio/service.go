@@ -118,7 +118,7 @@ func (s *Service) Load(ctx context.Context, currency string) (marketdata.Result,
 	sort.SliceStable(snapshot.Holdings, func(i, j int) bool { return snapshot.Holdings[i].Balance > snapshot.Holdings[j].Balance })
 	if len(entries) == 0 {
 		now := time.Now().UTC()
-		meta = marketdata.Meta{Provider: s.market.Provider(), Currency: currency, FetchedAt: now, ExpiresAt: now, CacheStatus: "hit"}
+		meta = marketdata.Meta{Provider: s.market.Provider(), PrimaryProvider: s.market.Provider(), Currency: currency, FetchedAt: now, ExpiresAt: now, CacheStatus: "hit"}
 	}
 	meta.Currency = currency
 	return marketdata.Result{Data: snapshot, Meta: meta}, nil

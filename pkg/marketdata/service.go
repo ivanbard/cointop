@@ -16,13 +16,14 @@ import (
 )
 
 type Config struct {
-	Provider      string
-	CacheDir      string
-	FreshTTL      time.Duration
-	CurrenciesTTL time.Duration
-	ChartTTL      time.Duration
-	MaxStale      time.Duration
-	Now           func() time.Time
+	Provider         string
+	FallbackProvider string
+	CacheDir         string
+	FreshTTL         time.Duration
+	CurrenciesTTL    time.Duration
+	ChartTTL         time.Duration
+	MaxStale         time.Duration
+	Now              func() time.Time
 }
 
 type flight struct {
@@ -32,24 +33,36 @@ type flight struct {
 }
 
 type Service struct {
-	provider api.Interface
-	name     string
-	cache    *snapshotCache
-	freshTTL time.Duration
-	currTTL  time.Duration
-	chartTTL time.Duration
-	maxStale time.Duration
-	now      func() time.Time
-	mu       sync.Mutex
-	flights  map[string]*flight
+	provider     api.Interface
+	fallback     api.Interface
+	name         string
+	fallbackName string
+	cache        *snapshotCache
+	freshTTL     time.Duration
+	currTTL      time.Duration
+	chartTTL     time.Duration
+	maxStale     time.Duration
+	now          func() time.Time
+	mu           sync.Mutex
+	flights      map[string]*flight
 }
 
 func NewService(provider api.Interface, config Config) (*Service, error) {
+	return NewServiceWithFallback(provider, nil, config)
+}
+
+func NewServiceWithFallback(provider, fallback api.Interface, config Config) (*Service, error) {
 	if provider == nil {
 		return nil, errors.New("provider is required")
 	}
 	if config.Provider == "" {
 		return nil, errors.New("provider name is required")
+	}
+	if fallback != nil && strings.TrimSpace(config.FallbackProvider) == "" {
+		return nil, errors.New("fallback provider name is required")
+	}
+	if fallback != nil && strings.EqualFold(config.Provider, config.FallbackProvider) {
+		return nil, errors.New("fallback provider must differ from primary provider")
 	}
 	if config.FreshTTL <= 0 {
 		config.FreshTTL = time.Minute
@@ -71,15 +84,17 @@ func NewService(provider api.Interface, config Config) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		provider: provider,
-		name:     strings.ToLower(config.Provider),
-		cache:    cache,
-		freshTTL: config.FreshTTL,
-		currTTL:  config.CurrenciesTTL,
-		chartTTL: config.ChartTTL,
-		maxStale: config.MaxStale,
-		now:      config.Now,
-		flights:  make(map[string]*flight),
+		provider:     provider,
+		fallback:     fallback,
+		name:         strings.ToLower(config.Provider),
+		fallbackName: strings.ToLower(config.FallbackProvider),
+		cache:        cache,
+		freshTTL:     config.FreshTTL,
+		currTTL:      config.CurrenciesTTL,
+		chartTTL:     config.ChartTTL,
+		maxStale:     config.MaxStale,
+		now:          config.Now,
+		flights:      make(map[string]*flight),
 	}, nil
 }
 
@@ -88,7 +103,7 @@ func (s *Service) Provider() string { return s.name }
 func (s *Service) Health() Result {
 	now := s.now().UTC()
 	return Result{Data: Health{Status: "ready"}, Meta: Meta{
-		Provider: s.name, FetchedAt: now, ExpiresAt: now,
+		Provider: s.name, PrimaryProvider: s.name, FetchedAt: now, ExpiresAt: now,
 		CacheStatus: "hit", Stale: false,
 	}}
 }
@@ -124,10 +139,9 @@ func (s *Service) Prices(ctx context.Context, coins []string, currency string) (
 
 func (s *Service) Coins(ctx context.Context, currency string) (Result, error) {
 	currency = normalizeCurrency(currency)
-	key := s.key("coins", currency, "all")
-	return s.cached(ctx, key, currency, s.freshTTL, func() (interface{}, error) {
+	return s.cached(ctx, "coins", currency, "all", s.freshTTL, "", func(provider api.Interface) (interface{}, error) {
 		ch := make(chan []apitypes.Coin)
-		if err := s.provider.GetAllCoinData(currency, ch); err != nil {
+		if err := provider.GetAllCoinData(currency, ch); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 		var coins []apitypes.Coin
@@ -166,8 +180,8 @@ func (s *Service) Coin(ctx context.Context, identifier, currency string) (Result
 
 func (s *Service) Global(ctx context.Context, currency string) (Result, error) {
 	currency = normalizeCurrency(currency)
-	return s.cached(ctx, s.key("global", currency, "market"), currency, s.freshTTL, func() (interface{}, error) {
-		data, err := s.provider.GetGlobalMarketData(currency)
+	return s.cached(ctx, "global", currency, "market", s.freshTTL, "", func(provider api.Interface) (interface{}, error) {
+		data, err := provider.GetGlobalMarketData(currency)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
@@ -176,8 +190,8 @@ func (s *Service) Global(ctx context.Context, currency string) (Result, error) {
 }
 
 func (s *Service) Currencies(ctx context.Context) (Result, error) {
-	return s.cached(ctx, s.key("currencies", "", "supported"), "", s.currTTL, func() (interface{}, error) {
-		currencies := append([]string(nil), s.provider.SupportedCurrencies()...)
+	return s.cached(ctx, "currencies", "", "supported", s.currTTL, "", func(provider api.Interface) (interface{}, error) {
+		currencies := append([]string(nil), provider.SupportedCurrencies()...)
 		if len(currencies) == 0 {
 			return nil, fmt.Errorf("%w: provider returned no currencies", ErrUnavailable)
 		}
@@ -203,8 +217,8 @@ func (s *Service) CoinHistory(ctx context.Context, identifier, currency, chartRa
 		return Result{}, err
 	}
 	identity := strings.ToLower(coin.ID) + ":" + rangeID
-	return s.cached(ctx, s.key("coin-history", currency, identity), currency, s.chartTTL, func() (interface{}, error) {
-		graph, fetchErr := s.provider.GetCoinGraphData(currency, coin.Symbol, coin.Name, start.Unix(), end.Unix())
+	return s.cached(ctx, "coin-history", currency, identity, s.chartTTL, coinResult.Meta.Provider, func(provider api.Interface) (interface{}, error) {
+		graph, fetchErr := provider.GetCoinGraphData(currency, coin.Symbol, coin.Name, start.Unix(), end.Unix())
 		if fetchErr != nil {
 			return nil, fmt.Errorf("%w: %v", ErrUnavailable, fetchErr)
 		}
@@ -218,8 +232,8 @@ func (s *Service) GlobalHistory(ctx context.Context, currency, chartRange string
 	if err != nil {
 		return Result{}, err
 	}
-	return s.cached(ctx, s.key("global-history", currency, rangeID), currency, s.chartTTL, func() (interface{}, error) {
-		graph, fetchErr := s.provider.GetGlobalMarketGraphData(currency, start.Unix(), end.Unix())
+	return s.cached(ctx, "global-history", currency, rangeID, s.chartTTL, "", func(provider api.Interface) (interface{}, error) {
+		graph, fetchErr := provider.GetGlobalMarketGraphData(currency, start.Unix(), end.Unix())
 		if fetchErr != nil {
 			return nil, fmt.Errorf("%w: %v", ErrUnavailable, fetchErr)
 		}
@@ -229,8 +243,8 @@ func (s *Service) GlobalHistory(ctx context.Context, currency, chartRange string
 
 func (s *Service) ExchangeRate(ctx context.Context, from, to string) (Result, error) {
 	from, to = normalizeCurrency(from), normalizeCurrency(to)
-	return s.cached(ctx, s.key("exchange-rate", to, from), to, s.freshTTL, func() (interface{}, error) {
-		rate, err := s.provider.GetExchangeRate(from, to, false)
+	return s.cached(ctx, "exchange-rate", to, from, s.freshTTL, "", func(provider api.Interface) (interface{}, error) {
+		rate, err := provider.GetExchangeRate(from, to, false)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
@@ -243,8 +257,8 @@ func (s *Service) CoinLink(ctx context.Context, identifier string) (Result, erro
 	if identifier == "" {
 		return Result{}, fmt.Errorf("%w: coin identifier is required", ErrInvalidInput)
 	}
-	return s.cached(ctx, s.key("coin-link", "", strings.ToLower(identifier)), "", s.currTTL, func() (interface{}, error) {
-		link := s.provider.CoinLink(identifier)
+	return s.cached(ctx, "coin-link", "", strings.ToLower(identifier), s.currTTL, "", func(provider api.Interface) (interface{}, error) {
+		link := provider.CoinLink(identifier)
 		if strings.TrimSpace(link) == "" {
 			return nil, fmt.Errorf("%w: coin link", ErrNotFound)
 		}
@@ -283,15 +297,28 @@ func chartWindow(value string, now time.Time) (string, time.Time, time.Time, err
 	return rangeID, start, now, nil
 }
 
-func (s *Service) cached(ctx context.Context, key, currency string, ttl time.Duration, fetch func() (interface{}, error)) (Result, error) {
-	now := s.now().UTC()
-	stale, hasStale := s.cache.get(key)
-	if hasStale && now.Before(stale.ExpiresAt) {
-		return resultFromSnapshot(stale, s.name, currency, "hit", false)
-	}
+type providerSource struct {
+	name string
+	api  api.Interface
+}
 
+func (s *Service) sources(preferred string) []providerSource {
+	primary := providerSource{name: s.name, api: s.provider}
+	if s.fallback == nil {
+		return []providerSource{primary}
+	}
+	fallback := providerSource{name: s.fallbackName, api: s.fallback}
+	if strings.EqualFold(preferred, fallback.name) {
+		return []providerSource{fallback, primary}
+	}
+	return []providerSource{primary, fallback}
+}
+
+func (s *Service) cached(ctx context.Context, resource, currency, identity string, ttl time.Duration, preferred string, fetch func(api.Interface) (interface{}, error)) (Result, error) {
+	now := s.now().UTC()
+	flightKey := strings.Join([]string{"request", strings.ToLower(preferred), resource, strings.ToUpper(currency), identity}, ":")
 	s.mu.Lock()
-	if existing, ok := s.flights[key]; ok {
+	if existing, ok := s.flights[flightKey]; ok {
 		s.mu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -301,51 +328,74 @@ func (s *Service) cached(ctx context.Context, key, currency string, ttl time.Dur
 		}
 	}
 	f := &flight{done: make(chan struct{})}
-	s.flights[key] = f
+	s.flights[flightKey] = f
 	s.mu.Unlock()
 
 	defer func() {
 		s.mu.Lock()
-		delete(s.flights, key)
+		delete(s.flights, flightKey)
 		close(f.done)
 		s.mu.Unlock()
 	}()
 
-	value, err := fetch()
-	if err != nil {
-		if hasStale && now.Before(stale.ExpiresAt.Add(s.maxStale)) {
-			f.result, f.err = resultFromSnapshot(stale, s.name, currency, "stale", true)
+	type staleCandidate struct {
+		entry    snapshot
+		provider string
+	}
+	var staleEntries []staleCandidate
+	var lastErr error
+	for _, source := range s.sources(preferred) {
+		key := s.key(source.name, resource, currency, identity)
+		stale, hasStale := s.cache.get(key)
+		if hasStale && now.Before(stale.ExpiresAt) {
+			f.result, f.err = s.resultFromSnapshot(stale, source.name, currency, "hit", false)
 			return f.result, f.err
 		}
-		f.err = err
-		return Result{}, err
+		if hasStale && now.Before(stale.ExpiresAt.Add(s.maxStale)) {
+			staleEntries = append(staleEntries, staleCandidate{stale, source.name})
+		}
+		value, err := fetch(source.api)
+		if err != nil {
+			lastErr = err
+			if !errors.Is(err, ErrUnavailable) {
+				f.err = err
+				return Result{}, err
+			}
+			continue
+		}
+		raw, err := json.Marshal(value)
+		if err != nil {
+			f.err = err
+			return Result{}, err
+		}
+		entry := snapshot{Version: CacheVersion, Key: key, Data: raw, FetchedAt: now, ExpiresAt: now.Add(ttl)}
+		_ = s.cache.set(entry)
+		f.result, f.err = s.resultFromSnapshot(entry, source.name, currency, "miss", false)
+		return f.result, f.err
 	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		f.err = err
-		return Result{}, err
+	if len(staleEntries) > 0 {
+		candidate := staleEntries[0]
+		f.result, f.err = s.resultFromSnapshot(candidate.entry, candidate.provider, currency, "stale", true)
+		return f.result, f.err
 	}
-	entry := snapshot{Version: CacheVersion, Key: key, Data: raw, FetchedAt: now, ExpiresAt: now.Add(ttl)}
-	// A persistence failure must not hide successfully fetched live data. The
-	// in-memory entry is installed before the disk write is attempted.
-	_ = s.cache.set(entry)
-	f.result, f.err = resultFromSnapshot(entry, s.name, currency, "miss", false)
-	return f.result, f.err
+	f.err = lastErr
+	return Result{}, lastErr
 }
 
-func resultFromSnapshot(entry snapshot, provider, currency, status string, stale bool) (Result, error) {
+func (s *Service) resultFromSnapshot(entry snapshot, provider, currency, status string, stale bool) (Result, error) {
 	var data interface{}
 	if err := json.Unmarshal(entry.Data, &data); err != nil {
 		return Result{}, err
 	}
 	return Result{Data: data, Meta: Meta{
-		Provider: provider, Currency: currency, FetchedAt: entry.FetchedAt,
+		Provider: provider, PrimaryProvider: s.name, FallbackUsed: provider != s.name,
+		Currency: currency, FetchedAt: entry.FetchedAt,
 		ExpiresAt: entry.ExpiresAt, CacheStatus: status, Stale: stale,
 	}}, nil
 }
 
-func (s *Service) key(resource, currency, identity string) string {
-	return strings.Join([]string{"v1", s.name, resource, strings.ToUpper(currency), identity}, ":")
+func (s *Service) key(provider, resource, currency, identity string) string {
+	return strings.Join([]string{"v1", provider, resource, strings.ToUpper(currency), identity}, ":")
 }
 
 func normalizeCurrency(currency string) string {

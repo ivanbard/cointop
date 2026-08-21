@@ -275,3 +275,55 @@ func TestExchangeRateAndCoinLinkAreCached(t *testing.T) {
 		t.Fatalf("unexpected link cache statuses: %s %s", first.Meta.CacheStatus, second.Meta.CacheStatus)
 	}
 }
+
+func TestProviderFallbackHasExplicitProvenance(t *testing.T) {
+	now := time.Now().UTC()
+	primary := &fakeProvider{fail: true}
+	fallback := &fakeProvider{coins: []apitypes.Coin{{ID: "bitcoin", Name: "Bitcoin", Symbol: "BTC", Rank: 1, Price: 43}}}
+	service, err := NewServiceWithFallback(primary, fallback, Config{Provider: "primary", FallbackProvider: "secondary", CacheDir: t.TempDir(), FreshTTL: time.Minute, MaxStale: time.Hour, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Prices(context.Background(), []string{"btc"}, "USD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Meta.Provider != "secondary" || result.Meta.PrimaryProvider != "primary" || !result.Meta.FallbackUsed {
+		t.Fatalf("metadata: %+v", result.Meta)
+	}
+	if primary.callCount() != 1 || fallback.callCount() != 1 {
+		t.Fatalf("calls primary=%d fallback=%d", primary.callCount(), fallback.callCount())
+	}
+	primary.fail = false
+	primary.coins = []apitypes.Coin{{ID: "bitcoin", Name: "Bitcoin", Symbol: "BTC", Rank: 1, Price: 44}}
+	recovered, err := service.Prices(context.Background(), []string{"btc"}, "USD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Meta.Provider != "primary" || recovered.Meta.FallbackUsed {
+		t.Fatalf("recovery metadata: %+v", recovered.Meta)
+	}
+}
+
+func TestHealthyPrimaryNeverQueriesFallbackAndNotFoundDoesNotFallback(t *testing.T) {
+	now := time.Now().UTC()
+	primary := &fakeProvider{coins: []apitypes.Coin{{ID: "bitcoin", Name: "Bitcoin", Symbol: "BTC", Rank: 1}}}
+	fallback := &fakeProvider{coins: []apitypes.Coin{{ID: "ethereum", Name: "Ethereum", Symbol: "ETH", Rank: 1}}}
+	service, err := NewServiceWithFallback(primary, fallback, Config{Provider: "primary", FallbackProvider: "secondary", CacheDir: t.TempDir(), Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Prices(context.Background(), []string{"btc"}, "USD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Meta.FallbackUsed || fallback.callCount() != 0 {
+		t.Fatalf("unexpected fallback: %+v calls=%d", result.Meta, fallback.callCount())
+	}
+	if _, err := service.Coin(context.Background(), "ethereum", "USD"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected not found, got %v", err)
+	}
+	if fallback.callCount() != 0 {
+		t.Fatal("not-found request queried fallback")
+	}
+}

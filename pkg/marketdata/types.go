@@ -16,12 +16,14 @@ var (
 )
 
 type Meta struct {
-	Provider    string    `json:"provider"`
-	Currency    string    `json:"currency,omitempty"`
-	FetchedAt   time.Time `json:"fetchedAt"`
-	ExpiresAt   time.Time `json:"expiresAt"`
-	CacheStatus string    `json:"cacheStatus"`
-	Stale       bool      `json:"stale"`
+	Provider        string    `json:"provider"`
+	PrimaryProvider string    `json:"primaryProvider"`
+	FallbackUsed    bool      `json:"fallbackUsed"`
+	Currency        string    `json:"currency,omitempty"`
+	FetchedAt       time.Time `json:"fetchedAt"`
+	ExpiresAt       time.Time `json:"expiresAt"`
+	CacheStatus     string    `json:"cacheStatus"`
+	Stale           bool      `json:"stale"`
 }
 
 type Result struct {
