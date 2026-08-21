@@ -256,6 +256,17 @@ func TestChartRangesCacheAndStaleFallback(t *testing.T) {
 	}
 }
 
+func TestAllChartRangeStartsAtEpoch(t *testing.T) {
+	now := time.Date(2026, 8, 21, 1, 0, 0, 0, time.UTC)
+	rangeID, start, end, err := chartWindow("all", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rangeID != "all" || start.Unix() != 0 || !end.Equal(now) {
+		t.Fatalf("range=%s start=%s end=%s", rangeID, start, end)
+	}
+}
+
 func TestExchangeRateAndCoinLinkAreCached(t *testing.T) {
 	now := time.Now().UTC()
 	provider := &fakeProvider{}
