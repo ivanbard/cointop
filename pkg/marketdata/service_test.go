@@ -24,6 +24,9 @@ type fakeProvider struct {
 func (f *fakeProvider) Ping() error { return nil }
 func (f *fakeProvider) GetAllCoinData(_ string, ch chan []apitypes.Coin) error {
 	f.record()
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
 	if f.fail {
 		return errors.New("offline")
 	}
@@ -325,5 +328,30 @@ func TestHealthyPrimaryNeverQueriesFallbackAndNotFoundDoesNotFallback(t *testing
 	}
 	if fallback.callCount() != 0 {
 		t.Fatal("not-found request queried fallback")
+	}
+}
+
+func TestPriceFetchPublishesCanonicalUpdate(t *testing.T) {
+	now := time.Now().UTC()
+	provider := &fakeProvider{coins: []apitypes.Coin{{ID: "bitcoin", Name: "Bitcoin", Symbol: "BTC", Rank: 1}}}
+	service := testService(t, provider, &now)
+	updates := make(chan Update, 2)
+	cancel := service.SubscribeUpdates(func(update Update) { updates <- update })
+	defer cancel()
+	if _, err := service.Prices(context.Background(), []string{"BTC"}, "USD"); err != nil {
+		t.Fatal(err)
+	}
+	first := <-updates
+	second := <-updates
+	if first.URI != "cointop://prices/btc?currency=USD" || second.URI != "cointop://prices/btc" {
+		t.Fatalf("updates: %#v %#v", first, second)
+	}
+	if _, err := service.Prices(context.Background(), []string{"btc"}, "USD"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case update := <-updates:
+		t.Fatalf("cache hit published update: %#v", update)
+	default:
 	}
 }

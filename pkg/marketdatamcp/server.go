@@ -30,6 +30,9 @@ type PortfolioReader interface {
 	Load(context.Context, string) (marketdata.Result, error)
 }
 type Options struct{ Portfolio PortfolioReader }
+type updateSubscriber interface {
+	SubscribeUpdates(func(marketdata.Update)) func()
+}
 
 type PricesInput struct {
 	Coins    []string `json:"coins" jsonschema:"one or more provider coin IDs, names, or symbols"`
@@ -105,7 +108,21 @@ func NewServer(reader Reader, version string) *mcp.Server {
 }
 
 func NewServerWithOptions(reader Reader, version string, options Options) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "cointop", Title: "Cointop Market Data", Version: version}, nil)
+	var serverOptions *mcp.ServerOptions
+	if _, ok := reader.(updateSubscriber); ok {
+		serverOptions = &mcp.ServerOptions{
+			SubscribeHandler: func(_ context.Context, req *mcp.SubscribeRequest) error {
+				return validatePriceSubscription(req.Params.URI)
+			},
+			UnsubscribeHandler: func(context.Context, *mcp.UnsubscribeRequest) error { return nil },
+		}
+	}
+	s := mcp.NewServer(&mcp.Implementation{Name: "cointop", Title: "Cointop Market Data", Version: version}, serverOptions)
+	if updates, ok := reader.(updateSubscriber); ok {
+		updates.SubscribeUpdates(func(update marketdata.Update) {
+			_ = s.ResourceUpdated(context.Background(), &mcp.ResourceUpdatedNotificationParams{URI: update.URI})
+		})
+	}
 	mcp.AddTool(s, tool("get_prices", "Get current prices for up to 100 coins."), func(ctx context.Context, _ *mcp.CallToolRequest, in PricesInput) (*mcp.CallToolResult, PricesOutput, error) {
 		result, err := reader.Prices(ctx, in.Coins, in.Currency)
 		if err != nil {
@@ -214,6 +231,14 @@ func NewServerWithOptions(reader Reader, version string, options Options) *mcp.S
 	}
 	registerResources(s, reader)
 	return s
+}
+
+func validatePriceSubscription(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "cointop" || u.Host != "prices" || strings.TrimSpace(strings.TrimPrefix(u.Path, "/")) == "" {
+		return errors.New("only price resources can be subscribed")
+	}
+	return nil
 }
 
 // NewHTTPHandler exposes the same server contract over stateless Streamable HTTP.

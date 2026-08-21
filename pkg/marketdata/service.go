@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -33,18 +34,21 @@ type flight struct {
 }
 
 type Service struct {
-	provider     api.Interface
-	fallback     api.Interface
-	name         string
-	fallbackName string
-	cache        *snapshotCache
-	freshTTL     time.Duration
-	currTTL      time.Duration
-	chartTTL     time.Duration
-	maxStale     time.Duration
-	now          func() time.Time
-	mu           sync.Mutex
-	flights      map[string]*flight
+	provider          api.Interface
+	fallback          api.Interface
+	name              string
+	fallbackName      string
+	cache             *snapshotCache
+	freshTTL          time.Duration
+	currTTL           time.Duration
+	chartTTL          time.Duration
+	maxStale          time.Duration
+	now               func() time.Time
+	mu                sync.Mutex
+	flights           map[string]*flight
+	updatesMu         sync.RWMutex
+	updateSubscribers map[uint64]func(Update)
+	nextSubscriber    uint64
 }
 
 func NewService(provider api.Interface, config Config) (*Service, error) {
@@ -84,17 +88,18 @@ func NewServiceWithFallback(provider, fallback api.Interface, config Config) (*S
 		return nil, err
 	}
 	return &Service{
-		provider:     provider,
-		fallback:     fallback,
-		name:         strings.ToLower(config.Provider),
-		fallbackName: strings.ToLower(config.FallbackProvider),
-		cache:        cache,
-		freshTTL:     config.FreshTTL,
-		currTTL:      config.CurrenciesTTL,
-		chartTTL:     config.ChartTTL,
-		maxStale:     config.MaxStale,
-		now:          config.Now,
-		flights:      make(map[string]*flight),
+		provider:          provider,
+		fallback:          fallback,
+		name:              strings.ToLower(config.Provider),
+		fallbackName:      strings.ToLower(config.FallbackProvider),
+		cache:             cache,
+		freshTTL:          config.FreshTTL,
+		currTTL:           config.CurrenciesTTL,
+		chartTTL:          config.ChartTTL,
+		maxStale:          config.MaxStale,
+		now:               config.Now,
+		flights:           make(map[string]*flight),
+		updateSubscribers: make(map[uint64]func(Update)),
 	}, nil
 }
 
@@ -134,7 +139,39 @@ func (s *Service) Prices(ctx context.Context, coins []string, currency string) (
 		prices = append(prices, Price{ID: coin.ID, Name: coin.Name, Symbol: coin.Symbol, Price: coin.Price})
 	}
 	market.Data = prices
+	if market.Meta.CacheStatus == "miss" {
+		baseURI := "cointop://prices/" + strings.Join(coins, ",")
+		s.notifyUpdate(Update{URI: baseURI + "?currency=" + url.QueryEscape(currency)})
+		if currency == "USD" {
+			s.notifyUpdate(Update{URI: baseURI})
+		}
+	}
 	return market, nil
+}
+
+// SubscribeUpdates registers a callback for newly fetched price resources.
+func (s *Service) SubscribeUpdates(callback func(Update)) func() {
+	if callback == nil {
+		return func() {}
+	}
+	s.updatesMu.Lock()
+	s.nextSubscriber++
+	id := s.nextSubscriber
+	s.updateSubscribers[id] = callback
+	s.updatesMu.Unlock()
+	return func() { s.updatesMu.Lock(); delete(s.updateSubscribers, id); s.updatesMu.Unlock() }
+}
+
+func (s *Service) notifyUpdate(update Update) {
+	s.updatesMu.RLock()
+	callbacks := make([]func(Update), 0, len(s.updateSubscribers))
+	for _, callback := range s.updateSubscribers {
+		callbacks = append(callbacks, callback)
+	}
+	s.updatesMu.RUnlock()
+	for _, callback := range callbacks {
+		callback(update)
+	}
 }
 
 func (s *Service) Coins(ctx context.Context, currency string) (Result, error) {
@@ -324,7 +361,11 @@ func (s *Service) cached(ctx context.Context, resource, currency, identity strin
 		case <-ctx.Done():
 			return Result{}, ctx.Err()
 		case <-existing.done:
-			return existing.result, existing.err
+			result := existing.result
+			if result.Meta.CacheStatus == "miss" {
+				result.Meta.CacheStatus = "hit"
+			}
+			return result, existing.err
 		}
 	}
 	f := &flight{done: make(chan struct{})}

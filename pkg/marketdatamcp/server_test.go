@@ -16,6 +16,15 @@ import (
 
 type fakeReader struct{ err error }
 type fakePortfolio struct{}
+type notifyingReader struct {
+	fakeReader
+	callback func(marketdata.Update)
+}
+
+func (n *notifyingReader) SubscribeUpdates(callback func(marketdata.Update)) func() {
+	n.callback = callback
+	return func() { n.callback = nil }
+}
 
 func (fakePortfolio) Load(context.Context, string) (marketdata.Result, error) {
 	return testResultPortfolio(), nil
@@ -179,5 +188,75 @@ func TestPortfolioDiscoveryIsOptIn(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("portfolio resource not advertised")
+	}
+}
+
+func TestPriceResourceSubscription(t *testing.T) {
+	ctx := context.Background()
+	reader := &notifyingReader{}
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := NewServer(reader, "vtest").Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	updates := make(chan string, 1)
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "vtest"}, &mcp.ClientOptions{ResourceUpdatedHandler: func(_ context.Context, req *mcp.ResourceUpdatedNotificationRequest) { updates <- req.Params.URI }})
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	if session.InitializeResult().Capabilities.Resources == nil || !session.InitializeResult().Capabilities.Resources.Subscribe {
+		t.Fatalf("subscription capability missing: %#v", session.InitializeResult().Capabilities.Resources)
+	}
+	uri := "cointop://prices/btc?currency=USD"
+	if err := session.Subscribe(ctx, &mcp.SubscribeParams{URI: uri}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		reader.callback(marketdata.Update{URI: uri})
+		select {
+		case got := <-updates:
+			if got != uri {
+				t.Fatalf("got %q", got)
+			}
+			return
+		case <-deadline:
+			t.Fatal("resource update not delivered")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestStreamableHTTPPriceSubscription(t *testing.T) {
+	reader := &notifyingReader{}
+	httpServer := httptest.NewServer(NewHTTPHandler(reader, "vtest"))
+	defer httpServer.Close()
+	updates := make(chan string, 1)
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "vtest"}, &mcp.ClientOptions{ResourceUpdatedHandler: func(_ context.Context, req *mcp.ResourceUpdatedNotificationRequest) { updates <- req.Params.URI }})
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	uri := "cointop://prices/btc?currency=USD"
+	if err := session.Subscribe(context.Background(), &mcp.SubscribeParams{URI: uri}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		reader.callback(marketdata.Update{URI: uri})
+		select {
+		case got := <-updates:
+			if got != uri {
+				t.Fatalf("got %q", got)
+			}
+			return
+		case <-deadline:
+			t.Fatal("HTTP resource update not delivered")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }

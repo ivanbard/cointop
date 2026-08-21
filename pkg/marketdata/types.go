@@ -69,3 +69,7 @@ type CoinLink struct {
 	Identifier string `json:"identifier"`
 	URL        string `json:"url"`
 }
+
+type Update struct {
+	URI string `json:"uri"`
+}
