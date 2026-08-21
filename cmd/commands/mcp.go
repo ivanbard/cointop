@@ -53,11 +53,11 @@ func MCPCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var portfolioReader *portfolio.Service
+			serverOptions := marketdatamcp.Options{}
 			if exposePortfolio {
-				portfolioReader = portfolio.NewService(service, settings.ConfigPath)
+				serverOptions.Portfolio = portfolio.NewService(service, settings.ConfigPath)
 			}
-			server := marketdatamcp.NewServerWithOptions(service, cointop.Version(), marketdatamcp.Options{Portfolio: portfolioReader})
+			server := marketdatamcp.NewServerWithOptions(service, cointop.Version(), serverOptions)
 			return server.Run(context.Background(), &mcp.StdioTransport{})
 		},
 	}
