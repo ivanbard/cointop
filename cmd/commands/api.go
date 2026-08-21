@@ -65,13 +65,16 @@ func APICmd() *cobra.Command {
 			logger := log.New()
 			logger.SetOutput(cmd.ErrOrStderr())
 			logger.SetFormatter(&log.JSONFormatter{})
-			var portfolioReader *portfolio.Service
+			restOptions := marketdatahttp.HandlerOptions{}
+			mcpOptions := marketdatamcp.Options{}
 			if exposePortfolio {
-				portfolioReader = portfolio.NewService(service, settings.ConfigPath)
+				portfolioReader := portfolio.NewService(service, settings.ConfigPath)
+				restOptions.Portfolio = portfolioReader
+				mcpOptions.Portfolio = portfolioReader
 			}
 			mux := http.NewServeMux()
-			mux.Handle("/mcp", marketdatamcp.NewHTTPHandlerWithOptions(service, cointop.Version(), marketdatamcp.Options{Portfolio: portfolioReader}))
-			mux.Handle("/", marketdatahttp.NewHandlerWithOptions(service, marketdatahttp.HandlerOptions{Portfolio: portfolioReader}))
+			mux.Handle("/mcp", marketdatamcp.NewHTTPHandlerWithOptions(service, cointop.Version(), mcpOptions))
+			mux.Handle("/", marketdatahttp.NewHandlerWithOptions(service, restOptions))
 			server := &http.Server{
 				Addr: listen, Handler: marketdatahttp.WithRequestLogging(mux, logger),
 				ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
