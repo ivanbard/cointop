@@ -73,7 +73,7 @@ func (f *fakeProvider) GetCoinDataBatch(_ []string, _ string) ([]apitypes.Coin, 
 	}
 	return append([]apitypes.Coin(nil), f.coins...), nil
 }
-func (f *fakeProvider) CoinLink(string) string                                { return "" }
+func (f *fakeProvider) CoinLink(slug string) string                           { return "https://example.test/" + slug }
 func (f *fakeProvider) SupportedCurrencies() []string                         { f.record(); return []string{"USD", "BTC"} }
 func (f *fakeProvider) Price(string, string) (float64, error)                 { return 0, nil }
 func (f *fakeProvider) GetExchangeRate(string, string, bool) (float64, error) { return 1, nil }
@@ -253,5 +253,25 @@ func TestChartRangesCacheAndStaleFallback(t *testing.T) {
 	}
 	if _, err := service.GlobalHistory(context.Background(), "USD", "2y"); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected invalid range, got %v", err)
+	}
+}
+
+func TestExchangeRateAndCoinLinkAreCached(t *testing.T) {
+	now := time.Now().UTC()
+	provider := &fakeProvider{}
+	service := testService(t, provider, &now)
+	if _, err := service.ExchangeRate(context.Background(), "btc", "usd"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.CoinLink(context.Background(), "bitcoin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.CoinLink(context.Background(), "BITCOIN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Meta.CacheStatus != "miss" || second.Meta.CacheStatus != "hit" {
+		t.Fatalf("unexpected link cache statuses: %s %s", first.Meta.CacheStatus, second.Meta.CacheStatus)
 	}
 }

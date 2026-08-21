@@ -56,3 +56,14 @@ type GlobalHistory struct {
 	End    time.Time            `json:"end"`
 	Series apitypes.MarketGraph `json:"series"`
 }
+
+type ExchangeRate struct {
+	From string  `json:"from"`
+	To   string  `json:"to"`
+	Rate float64 `json:"rate"`
+}
+
+type CoinLink struct {
+	Identifier string `json:"identifier"`
+	URL        string `json:"url"`
+}

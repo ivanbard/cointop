@@ -227,6 +227,31 @@ func (s *Service) GlobalHistory(ctx context.Context, currency, chartRange string
 	})
 }
 
+func (s *Service) ExchangeRate(ctx context.Context, from, to string) (Result, error) {
+	from, to = normalizeCurrency(from), normalizeCurrency(to)
+	return s.cached(ctx, s.key("exchange-rate", to, from), to, s.freshTTL, func() (interface{}, error) {
+		rate, err := s.provider.GetExchangeRate(from, to, false)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		}
+		return ExchangeRate{From: from, To: to, Rate: rate}, nil
+	})
+}
+
+func (s *Service) CoinLink(ctx context.Context, identifier string) (Result, error) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return Result{}, fmt.Errorf("%w: coin identifier is required", ErrInvalidInput)
+	}
+	return s.cached(ctx, s.key("coin-link", "", strings.ToLower(identifier)), "", s.currTTL, func() (interface{}, error) {
+		link := s.provider.CoinLink(identifier)
+		if strings.TrimSpace(link) == "" {
+			return nil, fmt.Errorf("%w: coin link", ErrNotFound)
+		}
+		return CoinLink{Identifier: identifier, URL: link}, nil
+	})
+}
+
 func chartWindow(value string, now time.Time) (string, time.Time, time.Time, error) {
 	rangeID := strings.ToLower(strings.TrimSpace(value))
 	if rangeID == "" {

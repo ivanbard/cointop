@@ -38,7 +38,7 @@ func (handlerProvider) GetCoinData(name, _ string) (types.Coin, error) {
 func (handlerProvider) GetCoinDataBatch([]string, string) ([]types.Coin, error) {
 	return []types.Coin{{ID: "bitcoin", Name: "Bitcoin", Symbol: "BTC", Price: 42}}, nil
 }
-func (handlerProvider) CoinLink(string) string                                { return "" }
+func (handlerProvider) CoinLink(slug string) string                           { return "https://example.test/" + slug }
 func (handlerProvider) SupportedCurrencies() []string                         { return []string{"USD", "BTC"} }
 func (handlerProvider) Price(string, string) (float64, error)                 { return 42, nil }
 func (handlerProvider) GetExchangeRate(string, string, bool) (float64, error) { return 1, nil }
@@ -92,6 +92,17 @@ func TestChartRoutesAndRangeValidation(t *testing.T) {
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, tc.path, nil))
 		if recorder.Code != tc.status {
 			t.Fatalf("%s: expected %d got %d: %s", tc.path, tc.status, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
+func TestTUIProviderRoutes(t *testing.T) {
+	handler := newTestHandler(t)
+	for _, path := range []string{"/v1/exchange-rate?from=BTC&to=USD", "/v1/links/coins/bitcoin"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, recorder.Code, recorder.Body.String())
 		}
 	}
 }
