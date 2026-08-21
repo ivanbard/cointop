@@ -31,10 +31,18 @@ func (f *fakeProvider) GetAllCoinData(_ string, ch chan []apitypes.Coin) error {
 	return nil
 }
 func (f *fakeProvider) GetCoinGraphData(string, string, string, int64, int64) (apitypes.CoinGraph, error) {
-	return apitypes.CoinGraph{}, nil
+	f.record()
+	if f.fail {
+		return apitypes.CoinGraph{}, errors.New("offline")
+	}
+	return apitypes.CoinGraph{Price: [][]float64{{1, 42}}}, nil
 }
 func (f *fakeProvider) GetGlobalMarketGraphData(string, int64, int64) (apitypes.MarketGraph, error) {
-	return apitypes.MarketGraph{}, nil
+	f.record()
+	if f.fail {
+		return apitypes.MarketGraph{}, errors.New("offline")
+	}
+	return apitypes.MarketGraph{MarketCapByAvailableSupply: [][]float64{{1, 100}}}, nil
 }
 func (f *fakeProvider) GetGlobalMarketData(string) (apitypes.GlobalMarketData, error) {
 	f.record()
@@ -213,5 +221,37 @@ func TestCorruptSnapshotBecomesCacheMiss(t *testing.T) {
 	}
 	if _, err := os.Stat(cache.path(key) + ".corrupt"); err != nil {
 		t.Fatalf("corrupt snapshot was not quarantined: %v", err)
+	}
+}
+
+func TestChartRangesCacheAndStaleFallback(t *testing.T) {
+	now := time.Date(2026, 8, 21, 1, 0, 0, 0, time.UTC)
+	provider := &fakeProvider{coins: []apitypes.Coin{{ID: "bitcoin", Name: "Bitcoin", Symbol: "BTC", Rank: 1}}}
+	service := testService(t, provider, &now)
+	first, err := service.CoinHistory(context.Background(), "btc", "usd", "ytd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Meta.CacheStatus != "miss" || provider.callCount() != 2 {
+		t.Fatalf("unexpected first chart result: %+v calls=%d", first.Meta, provider.callCount())
+	}
+	second, err := service.CoinHistory(context.Background(), "bitcoin", "USD", "YTD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Meta.CacheStatus != "hit" || provider.callCount() != 2 {
+		t.Fatalf("chart cache missed: %+v calls=%d", second.Meta, provider.callCount())
+	}
+	now = now.Add(6 * time.Minute)
+	provider.fail = true
+	stale, err := service.CoinHistory(context.Background(), "bitcoin", "USD", "ytd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stale.Meta.Stale || stale.Meta.CacheStatus != "stale" {
+		t.Fatalf("expected stale chart, got %+v", stale.Meta)
+	}
+	if _, err := service.GlobalHistory(context.Background(), "USD", "2y"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid range, got %v", err)
 	}
 }

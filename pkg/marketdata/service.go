@@ -20,6 +20,7 @@ type Config struct {
 	CacheDir      string
 	FreshTTL      time.Duration
 	CurrenciesTTL time.Duration
+	ChartTTL      time.Duration
 	MaxStale      time.Duration
 	Now           func() time.Time
 }
@@ -36,6 +37,7 @@ type Service struct {
 	cache    *snapshotCache
 	freshTTL time.Duration
 	currTTL  time.Duration
+	chartTTL time.Duration
 	maxStale time.Duration
 	now      func() time.Time
 	mu       sync.Mutex
@@ -55,6 +57,9 @@ func NewService(provider api.Interface, config Config) (*Service, error) {
 	if config.CurrenciesTTL <= 0 {
 		config.CurrenciesTTL = 24 * time.Hour
 	}
+	if config.ChartTTL <= 0 {
+		config.ChartTTL = 5 * time.Minute
+	}
 	if config.MaxStale <= 0 {
 		config.MaxStale = 24 * time.Hour
 	}
@@ -71,6 +76,7 @@ func NewService(provider api.Interface, config Config) (*Service, error) {
 		cache:    cache,
 		freshTTL: config.FreshTTL,
 		currTTL:  config.CurrenciesTTL,
+		chartTTL: config.ChartTTL,
 		maxStale: config.MaxStale,
 		now:      config.Now,
 		flights:  make(map[string]*flight),
@@ -178,6 +184,78 @@ func (s *Service) Currencies(ctx context.Context) (Result, error) {
 		sort.Strings(currencies)
 		return currencies, nil
 	})
+}
+
+func (s *Service) CoinHistory(ctx context.Context, identifier, currency, chartRange string) (Result, error) {
+	coinResult, err := s.Coin(ctx, identifier, currency)
+	if err != nil {
+		return Result{}, err
+	}
+	var coin apitypes.Coin
+	if raw, marshalErr := json.Marshal(coinResult.Data); marshalErr != nil {
+		return Result{}, marshalErr
+	} else if unmarshalErr := json.Unmarshal(raw, &coin); unmarshalErr != nil {
+		return Result{}, unmarshalErr
+	}
+	currency = normalizeCurrency(currency)
+	rangeID, start, end, err := chartWindow(chartRange, s.now().UTC())
+	if err != nil {
+		return Result{}, err
+	}
+	identity := strings.ToLower(coin.ID) + ":" + rangeID
+	return s.cached(ctx, s.key("coin-history", currency, identity), currency, s.chartTTL, func() (interface{}, error) {
+		graph, fetchErr := s.provider.GetCoinGraphData(currency, coin.Symbol, coin.Name, start.Unix(), end.Unix())
+		if fetchErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrUnavailable, fetchErr)
+		}
+		return CoinHistory{ID: coin.ID, Name: coin.Name, Symbol: coin.Symbol, Range: rangeID, Start: start, End: end, Series: graph}, nil
+	})
+}
+
+func (s *Service) GlobalHistory(ctx context.Context, currency, chartRange string) (Result, error) {
+	currency = normalizeCurrency(currency)
+	rangeID, start, end, err := chartWindow(chartRange, s.now().UTC())
+	if err != nil {
+		return Result{}, err
+	}
+	return s.cached(ctx, s.key("global-history", currency, rangeID), currency, s.chartTTL, func() (interface{}, error) {
+		graph, fetchErr := s.provider.GetGlobalMarketGraphData(currency, start.Unix(), end.Unix())
+		if fetchErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrUnavailable, fetchErr)
+		}
+		return GlobalHistory{Range: rangeID, Start: start, End: end, Series: graph}, nil
+	})
+}
+
+func chartWindow(value string, now time.Time) (string, time.Time, time.Time, error) {
+	rangeID := strings.ToLower(strings.TrimSpace(value))
+	if rangeID == "" {
+		rangeID = "24h"
+	}
+	var start time.Time
+	switch rangeID {
+	case "24h":
+		start = now.Add(-24 * time.Hour)
+	case "3d":
+		start = now.Add(-3 * 24 * time.Hour)
+	case "7d":
+		start = now.Add(-7 * 24 * time.Hour)
+	case "1m":
+		start = now.AddDate(0, -1, 0)
+	case "3m":
+		start = now.AddDate(0, -3, 0)
+	case "6m":
+		start = now.AddDate(0, -6, 0)
+	case "ytd":
+		start = time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
+	case "1y":
+		start = now.AddDate(-1, 0, 0)
+	case "all":
+		start = now.AddDate(-10, 0, 0)
+	default:
+		return "", time.Time{}, time.Time{}, fmt.Errorf("%w: unsupported range", ErrInvalidInput)
+	}
+	return rangeID, start, now, nil
 }
 
 func (s *Service) cached(ctx context.Context, key, currency string, ttl time.Duration, fetch func() (interface{}, error)) (Result, error) {

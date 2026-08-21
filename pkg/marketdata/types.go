@@ -3,6 +3,8 @@ package marketdata
 import (
 	"errors"
 	"time"
+
+	apitypes "github.com/cointop-sh/cointop/pkg/api/types"
 )
 
 const CacheVersion = 1
@@ -36,4 +38,21 @@ type Price struct {
 
 type Health struct {
 	Status string `json:"status"`
+}
+
+type CoinHistory struct {
+	ID     string             `json:"id"`
+	Name   string             `json:"name"`
+	Symbol string             `json:"symbol"`
+	Range  string             `json:"range"`
+	Start  time.Time          `json:"start"`
+	End    time.Time          `json:"end"`
+	Series apitypes.CoinGraph `json:"series"`
+}
+
+type GlobalHistory struct {
+	Range  string               `json:"range"`
+	Start  time.Time            `json:"start"`
+	End    time.Time            `json:"end"`
+	Series apitypes.MarketGraph `json:"series"`
 }
