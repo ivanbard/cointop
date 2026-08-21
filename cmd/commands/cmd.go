@@ -16,6 +16,7 @@ func Execute() {
 		PriceCmd(),
 		DominanceCmd(),
 		APICmd(),
+		MCPCmd(),
 		DataCmd(),
 		ServerCmd(),
 		TestCmd(),

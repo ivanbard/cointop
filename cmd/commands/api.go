@@ -8,7 +8,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cointop-sh/cointop/pkg/marketdata"
 	"github.com/cointop-sh/cointop/pkg/marketdatahttp"
 	"github.com/cointop-sh/cointop/pkg/pathutil"
 	log "github.com/sirupsen/logrus"
@@ -54,14 +53,7 @@ func APICmd() *cobra.Command {
 				settings.Provider.MaxPages = maxPages
 			}
 
-			provider, providerID, err := marketdata.NewProvider(settings.Provider)
-			if err != nil {
-				return err
-			}
-			service, err := marketdata.NewService(provider, marketdata.Config{
-				Provider: providerID, CacheDir: settings.CacheDir, FreshTTL: freshTTL,
-				CurrenciesTTL: 24 * time.Hour, MaxStale: maxStale,
-			})
+			service, err := newMarketService(settings, marketServiceOptions{FreshTTL: freshTTL, MaxStale: maxStale})
 			if err != nil {
 				return err
 			}
@@ -78,7 +70,7 @@ func APICmd() *cobra.Command {
 			defer stop()
 			serverErr := make(chan error, 1)
 			go func() { serverErr <- server.ListenAndServe() }()
-			logger.WithFields(log.Fields{"listen": listen, "provider": providerID}).Info("cointop API started")
+			logger.WithFields(log.Fields{"listen": listen, "provider": service.Provider()}).Info("cointop API started")
 			select {
 			case err := <-serverErr:
 				if err != nil && err != http.ErrServerClosed {
