@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cointop-sh/cointop/pkg/marketdata"
 )
@@ -48,6 +50,7 @@ func NewHandlerWithOptions(service *marketdata.Service, options HandlerOptions) 
 	h.mux.HandleFunc("/v1/charts/global", h.globalHistory)
 	h.mux.HandleFunc("/v1/exchange-rate", h.exchangeRate)
 	h.mux.HandleFunc("/v1/links/coins/", h.coinLink)
+	h.mux.HandleFunc("/v1/stream/prices", h.streamPrices)
 	if h.portfolio != nil {
 		h.mux.HandleFunc("/v1/portfolio", h.portfolioSnapshot)
 	}
@@ -193,6 +196,95 @@ func (h *Handler) coinLink(w http.ResponseWriter, r *http.Request) {
 	}
 	result, serviceErr := h.service.CoinLink(r.Context(), identifier)
 	writeResult(w, result, serviceErr)
+}
+
+func (h *Handler) streamPrices(w http.ResponseWriter, r *http.Request) {
+	if !getOnly(w, r) {
+		return
+	}
+	coins := splitCSV(r.URL.Query().Get("coins"))
+	if len(coins) == 0 || len(coins) > 100 {
+		writeError(w, http.StatusBadRequest, "invalid_input", "coins must contain between 1 and 100 identifiers")
+		return
+	}
+	interval, err := streamInterval(r.URL.Query().Get("interval"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error())
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "internal_error", "streaming is unavailable")
+		return
+	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	writePrices := func() bool {
+		result, requestErr := h.service.Prices(r.Context(), coins, r.URL.Query().Get("currency"))
+		var event string
+		var payload any
+		if requestErr != nil {
+			event = "error"
+			streamErr := apiError{Code: "internal_error", Message: "market data request failed"}
+			switch {
+			case errors.Is(requestErr, marketdata.ErrInvalidInput):
+				streamErr = apiError{Code: "invalid_input", Message: "invalid input"}
+			case errors.Is(requestErr, marketdata.ErrNotFound):
+				streamErr = apiError{Code: "coin_not_found", Message: "coin was not found"}
+			case errors.Is(requestErr, marketdata.ErrUnavailable):
+				streamErr = apiError{Code: "upstream_unavailable", Message: "market data provider is unavailable"}
+			}
+			payload = errorBody{Error: streamErr}
+		} else {
+			event = "prices"
+			payload = result
+		}
+		body, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			return false
+		}
+		if _, writeErr := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body); writeErr != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	if !writePrices() {
+		return
+	}
+	pricesTicker := time.NewTicker(interval)
+	defer pricesTicker.Stop()
+	heartbeatTicker := time.NewTicker(15 * time.Second)
+	defer heartbeatTicker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeatTicker.C:
+			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-pricesTicker.C:
+			if !writePrices() {
+				return
+			}
+		}
+	}
+}
+
+func streamInterval(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return time.Minute, nil
+	}
+	interval, err := time.ParseDuration(value)
+	if err != nil || interval < 15*time.Second || interval > time.Hour {
+		return 0, errors.New("interval must be between 15s and 1h")
+	}
+	return interval, nil
 }
 
 func getOnly(w http.ResponseWriter, r *http.Request) bool {

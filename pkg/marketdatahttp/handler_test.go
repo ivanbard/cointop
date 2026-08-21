@@ -1,10 +1,12 @@
 package marketdatahttp
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/cointop-sh/cointop/pkg/api/types"
@@ -130,6 +132,34 @@ func TestPortfolioRouteIsRuntimeGated(t *testing.T) {
 	enabled.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/portfolio", nil))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("enabled status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPriceStreamValidationAndInitialEvent(t *testing.T) {
+	handler := newTestHandler(t)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/stream/prices?coins=btc&interval=1s", nil))
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("validation status=%d", recorder.Code)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	response, err := http.Get(server.URL + "/v1/stream/prices?coins=btc,eth&currency=USD&interval=15s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanner := bufio.NewScanner(response.Body)
+	var lines []string
+	for scanner.Scan() {
+		if scanner.Text() == "" {
+			break
+		}
+		lines = append(lines, scanner.Text())
+	}
+	_ = response.Body.Close()
+	joined := strings.Join(lines, "\n")
+	if response.Header.Get("Content-Type") != "text/event-stream" || !strings.Contains(joined, "event: prices") || !strings.Contains(joined, "\"cacheStatus\"") {
+		t.Fatalf("unexpected stream: headers=%v lines=%s", response.Header, joined)
 	}
 }
 
