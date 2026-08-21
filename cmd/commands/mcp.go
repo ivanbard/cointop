@@ -8,6 +8,7 @@ import (
 	"github.com/cointop-sh/cointop/cointop"
 	"github.com/cointop-sh/cointop/pkg/marketdatamcp"
 	"github.com/cointop-sh/cointop/pkg/pathutil"
+	"github.com/cointop-sh/cointop/pkg/portfolio"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +19,7 @@ func MCPCmd() *cobra.Command {
 	var cmcKey, cgKey, cgProKey string
 	var perPage, maxPages uint
 	var freshTTL, maxStale time.Duration
+	var exposePortfolio bool
 	command := &cobra.Command{
 		Use: "mcp", Short: "Run the read-only market data MCP server over stdio",
 		SilenceUsage: true,
@@ -51,7 +53,11 @@ func MCPCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			server := marketdatamcp.NewServer(service, cointop.Version())
+			var portfolioReader *portfolio.Service
+			if exposePortfolio {
+				portfolioReader = portfolio.NewService(service, settings.ConfigPath)
+			}
+			server := marketdatamcp.NewServerWithOptions(service, cointop.Version(), marketdatamcp.Options{Portfolio: portfolioReader})
 			return server.Run(context.Background(), &mcp.StdioTransport{})
 		},
 	}
@@ -66,5 +72,6 @@ func MCPCmd() *cobra.Command {
 	command.Flags().UintVar(&maxPages, "max-pages", 10, "Maximum provider pages fetched")
 	command.Flags().DurationVar(&freshTTL, "cache-ttl", time.Minute, "Fresh-data cache duration")
 	command.Flags().DurationVar(&maxStale, "max-stale", 24*time.Hour, "Maximum stale fallback duration")
+	command.Flags().BoolVar(&exposePortfolio, "expose-portfolio", false, "Expose read-only portfolio data for this process")
 	return command
 }

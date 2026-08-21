@@ -25,7 +25,17 @@ func DataCmd() *cobra.Command {
 		dataCoinCmd(&endpoint, &timeout), dataGlobalCmd(&endpoint, &timeout),
 		dataCurrenciesCmd(&endpoint, &timeout),
 		dataChartCmd(&endpoint, &timeout),
+		dataPortfolioCmd(&endpoint, &timeout),
 	)
+	return command
+}
+
+func dataPortfolioCmd(endpoint *string, timeout *time.Duration) *cobra.Command {
+	var currency string
+	command := &cobra.Command{Use: "portfolio", Short: "Get an explicitly exposed read-only portfolio", RunE: func(cmd *cobra.Command, _ []string) error {
+		return requestData(cmd, *endpoint, "/v1/portfolio", url.Values{"currency": {currency}}, *timeout)
+	}}
+	command.Flags().StringVar(&currency, "currency", "USD", "Portfolio currency")
 	return command
 }
 

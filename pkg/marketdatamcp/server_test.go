@@ -10,10 +10,20 @@ import (
 
 	apitypes "github.com/cointop-sh/cointop/pkg/api/types"
 	"github.com/cointop-sh/cointop/pkg/marketdata"
+	"github.com/cointop-sh/cointop/pkg/portfolio"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type fakeReader struct{ err error }
+type fakePortfolio struct{}
+
+func (fakePortfolio) Load(context.Context, string) (marketdata.Result, error) {
+	return testResultPortfolio(), nil
+}
+func testResultPortfolio() marketdata.Result {
+	now := time.Now().UTC()
+	return marketdata.Result{Data: portfolio.Snapshot{Currency: "USD", Holdings: []portfolio.Holding{}}, Meta: marketdata.Meta{Provider: "fake", FetchedAt: now, ExpiresAt: now, CacheStatus: "hit"}}
+}
 
 func (f fakeReader) result(data any, currency string) (marketdata.Result, error) {
 	if f.err != nil {
@@ -133,5 +143,41 @@ func TestResourcesAndSafeErrors(t *testing.T) {
 	}
 	if result.Content[0].(*mcp.TextContent).Text != "market data provider unavailable" {
 		t.Fatalf("unsafe error: %q", result.Content[0].(*mcp.TextContent).Text)
+	}
+}
+
+func TestPortfolioDiscoveryIsOptIn(t *testing.T) {
+	ctx := context.Background()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := NewServerWithOptions(fakeReader{}, "vtest", Options{Portfolio: fakePortfolio{}}).Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "vtest"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	tools, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools.Tools) != 8 {
+		t.Fatalf("got %d tools", len(tools.Tools))
+	}
+	resources, err := session.ListResources(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, resource := range resources.Resources {
+		if resource.URI == "cointop://portfolio" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("portfolio resource not advertised")
 	}
 }

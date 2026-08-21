@@ -1,6 +1,7 @@
 package marketdatahttp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,12 @@ import (
 	"github.com/cointop-sh/cointop/pkg/api/types"
 	"github.com/cointop-sh/cointop/pkg/marketdata"
 )
+
+type testPortfolio struct{}
+
+func (testPortfolio) Load(context.Context, string) (marketdata.Result, error) {
+	return marketdata.Result{Data: map[string]any{"holdings": []any{}}}, nil
+}
 
 type handlerProvider struct{}
 
@@ -104,6 +111,25 @@ func TestTUIProviderRoutes(t *testing.T) {
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("%s: %d %s", path, recorder.Code, recorder.Body.String())
 		}
+	}
+}
+
+func TestPortfolioRouteIsRuntimeGated(t *testing.T) {
+	disabled := newTestHandler(t)
+	recorder := httptest.NewRecorder()
+	disabled.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/portfolio", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("disabled status=%d", recorder.Code)
+	}
+	service, err := marketdata.NewService(handlerProvider{}, marketdata.Config{Provider: "fake", CacheDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := NewHandlerWithOptions(service, HandlerOptions{Portfolio: testPortfolio{}})
+	recorder = httptest.NewRecorder()
+	enabled.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/portfolio", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("enabled status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

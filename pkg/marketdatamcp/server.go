@@ -12,6 +12,7 @@ import (
 
 	apitypes "github.com/cointop-sh/cointop/pkg/api/types"
 	"github.com/cointop-sh/cointop/pkg/marketdata"
+	"github.com/cointop-sh/cointop/pkg/portfolio"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -25,6 +26,10 @@ type Reader interface {
 	CoinHistory(context.Context, string, string, string) (marketdata.Result, error)
 	GlobalHistory(context.Context, string, string) (marketdata.Result, error)
 }
+type PortfolioReader interface {
+	Load(context.Context, string) (marketdata.Result, error)
+}
+type Options struct{ Portfolio PortfolioReader }
 
 type PricesInput struct {
 	Coins    []string `json:"coins" jsonschema:"one or more provider coin IDs, names, or symbols"`
@@ -81,6 +86,10 @@ type GlobalHistoryOutput struct {
 	Data marketdata.GlobalHistory `json:"data"`
 	Meta marketdata.Meta          `json:"meta"`
 }
+type PortfolioOutput struct {
+	Data portfolio.Snapshot `json:"data"`
+	Meta marketdata.Meta    `json:"meta"`
+}
 
 func boolPtr(v bool) *bool { return &v }
 
@@ -92,6 +101,10 @@ func tool(name, description string) *mcp.Tool {
 
 // NewServer constructs the common MCP server used by stdio and HTTP transports.
 func NewServer(reader Reader, version string) *mcp.Server {
+	return NewServerWithOptions(reader, version, Options{})
+}
+
+func NewServerWithOptions(reader Reader, version string, options Options) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "cointop", Title: "Cointop Market Data", Version: version}, nil)
 	mcp.AddTool(s, tool("get_prices", "Get current prices for up to 100 coins."), func(ctx context.Context, _ *mcp.CallToolRequest, in PricesInput) (*mcp.CallToolResult, PricesOutput, error) {
 		result, err := reader.Prices(ctx, in.Coins, in.Currency)
@@ -185,19 +198,51 @@ func NewServer(reader Reader, version string) *mcp.Server {
 		}
 		return nil, GlobalHistoryOutput{Data: data, Meta: result.Meta}, nil
 	})
+	if options.Portfolio != nil {
+		mcp.AddTool(s, tool("get_portfolio", "Get the explicitly exposed local read-only portfolio."), func(ctx context.Context, _ *mcp.CallToolRequest, in GlobalInput) (*mcp.CallToolResult, PortfolioOutput, error) {
+			result, err := options.Portfolio.Load(ctx, in.Currency)
+			if err != nil {
+				return nil, PortfolioOutput{}, safeError(err)
+			}
+			var data portfolio.Snapshot
+			if err := convert(result.Data, &data); err != nil {
+				return nil, PortfolioOutput{}, safeError(err)
+			}
+			return nil, PortfolioOutput{Data: data, Meta: result.Meta}, nil
+		})
+		s.AddResource(&mcp.Resource{Name: "portfolio", URI: "cointop://portfolio", MIMEType: "application/json", Description: "Explicitly exposed local portfolio."}, portfolioResource(options.Portfolio))
+	}
 	registerResources(s, reader)
 	return s
 }
 
 // NewHTTPHandler exposes the same server contract over stateless Streamable HTTP.
 func NewHTTPHandler(reader Reader, version string) http.Handler {
-	server := NewServer(reader, version)
+	return NewHTTPHandlerWithOptions(reader, version, Options{})
+}
+
+func NewHTTPHandlerWithOptions(reader Reader, version string, serverOptions Options) http.Handler {
+	server := NewServerWithOptions(reader, version, serverOptions)
 	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
 		Stateless:                    true,
 		JSONResponse:                 true,
 		MaxRequestBodyBytes:          1 << 20,
 		PropagateRequestCancellation: true,
 	})
+}
+
+func portfolioResource(reader PortfolioReader) mcp.ResourceHandler {
+	return func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		result, err := reader.Load(ctx, "USD")
+		if err != nil {
+			return nil, safeError(err)
+		}
+		body, err := json.Marshal(result)
+		if err != nil {
+			return nil, errors.New("market data request failed")
+		}
+		return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{URI: req.Params.URI, MIMEType: "application/json", Text: string(body)}}}, nil
+	}
 }
 
 func registerResources(s *mcp.Server, reader Reader) {

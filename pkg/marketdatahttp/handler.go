@@ -1,6 +1,7 @@
 package marketdatahttp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,9 +13,15 @@ import (
 )
 
 type Handler struct {
-	service *marketdata.Service
-	mux     *http.ServeMux
+	service   *marketdata.Service
+	portfolio PortfolioReader
+	mux       *http.ServeMux
 }
+
+type PortfolioReader interface {
+	Load(context.Context, string) (marketdata.Result, error)
+}
+type HandlerOptions struct{ Portfolio PortfolioReader }
 
 type errorBody struct {
 	Error apiError `json:"error"`
@@ -26,7 +33,11 @@ type apiError struct {
 }
 
 func NewHandler(service *marketdata.Service) http.Handler {
-	h := &Handler{service: service, mux: http.NewServeMux()}
+	return NewHandlerWithOptions(service, HandlerOptions{})
+}
+
+func NewHandlerWithOptions(service *marketdata.Service, options HandlerOptions) http.Handler {
+	h := &Handler{service: service, portfolio: options.Portfolio, mux: http.NewServeMux()}
 	h.mux.HandleFunc("/v1/health", h.health)
 	h.mux.HandleFunc("/v1/prices", h.prices)
 	h.mux.HandleFunc("/v1/coins", h.coins)
@@ -37,8 +48,19 @@ func NewHandler(service *marketdata.Service) http.Handler {
 	h.mux.HandleFunc("/v1/charts/global", h.globalHistory)
 	h.mux.HandleFunc("/v1/exchange-rate", h.exchangeRate)
 	h.mux.HandleFunc("/v1/links/coins/", h.coinLink)
+	if h.portfolio != nil {
+		h.mux.HandleFunc("/v1/portfolio", h.portfolioSnapshot)
+	}
 	h.mux.HandleFunc("/", h.notFound)
 	return h
+}
+
+func (h *Handler) portfolioSnapshot(w http.ResponseWriter, r *http.Request) {
+	if !getOnly(w, r) {
+		return
+	}
+	result, err := h.portfolio.Load(r.Context(), r.URL.Query().Get("currency"))
+	writeResult(w, result, err)
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

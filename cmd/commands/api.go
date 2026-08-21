@@ -12,6 +12,7 @@ import (
 	"github.com/cointop-sh/cointop/pkg/marketdatahttp"
 	"github.com/cointop-sh/cointop/pkg/marketdatamcp"
 	"github.com/cointop-sh/cointop/pkg/pathutil"
+	"github.com/cointop-sh/cointop/pkg/portfolio"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -21,6 +22,7 @@ func APICmd() *cobra.Command {
 	var cmcKey, cgKey, cgProKey string
 	var perPage, maxPages uint
 	var freshTTL, maxStale time.Duration
+	var exposePortfolio bool
 
 	command := &cobra.Command{
 		Use:   "api",
@@ -63,9 +65,13 @@ func APICmd() *cobra.Command {
 			logger := log.New()
 			logger.SetOutput(cmd.ErrOrStderr())
 			logger.SetFormatter(&log.JSONFormatter{})
+			var portfolioReader *portfolio.Service
+			if exposePortfolio {
+				portfolioReader = portfolio.NewService(service, settings.ConfigPath)
+			}
 			mux := http.NewServeMux()
-			mux.Handle("/mcp", marketdatamcp.NewHTTPHandler(service, cointop.Version()))
-			mux.Handle("/", marketdatahttp.NewHandler(service))
+			mux.Handle("/mcp", marketdatamcp.NewHTTPHandlerWithOptions(service, cointop.Version(), marketdatamcp.Options{Portfolio: portfolioReader}))
+			mux.Handle("/", marketdatahttp.NewHandlerWithOptions(service, marketdatahttp.HandlerOptions{Portfolio: portfolioReader}))
 			server := &http.Server{
 				Addr: listen, Handler: marketdatahttp.WithRequestLogging(mux, logger),
 				ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
@@ -100,5 +106,6 @@ func APICmd() *cobra.Command {
 	command.Flags().UintVar(&maxPages, "max-pages", 10, "Maximum provider pages fetched")
 	command.Flags().DurationVar(&freshTTL, "cache-ttl", time.Minute, "Fresh-data cache duration")
 	command.Flags().DurationVar(&maxStale, "max-stale", 24*time.Hour, "Maximum stale fallback duration")
+	command.Flags().BoolVar(&exposePortfolio, "expose-portfolio", false, "Expose read-only portfolio data for this process")
 	return command
 }
