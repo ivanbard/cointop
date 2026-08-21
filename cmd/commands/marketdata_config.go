@@ -23,8 +23,9 @@ type marketConfigFile struct {
 }
 
 type daemonSettings struct {
-	Provider marketdata.ProviderConfig
-	CacheDir string
+	Provider   marketdata.ProviderConfig
+	CacheDir   string
+	ConfigPath string
 }
 
 func loadDaemonSettings(configPath string) (daemonSettings, error) {
@@ -46,6 +47,7 @@ func loadDaemonSettings(configPath string) (daemonSettings, error) {
 			}
 		}
 	}
+	settings.ConfigPath = configPath
 	var fileConfig marketConfigFile
 	if _, err := os.Stat(configPath); err == nil {
 		if _, err := toml.DecodeFile(configPath, &fileConfig); err != nil {
