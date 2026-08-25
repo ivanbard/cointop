@@ -41,6 +41,7 @@ func NewHandler(service *marketdata.Service) http.Handler {
 func NewHandlerWithOptions(service *marketdata.Service, options HandlerOptions) http.Handler {
 	h := &Handler{service: service, portfolio: options.Portfolio, mux: http.NewServeMux()}
 	h.mux.HandleFunc("/v1/health", h.health)
+	h.mux.HandleFunc("/v1/ready", h.ready)
 	h.mux.HandleFunc("/v1/prices", h.prices)
 	h.mux.HandleFunc("/v1/coins", h.coins)
 	h.mux.HandleFunc("/v1/coins/", h.coin)
@@ -79,6 +80,18 @@ func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, h.service.Health())
+}
+
+func (h *Handler) ready(w http.ResponseWriter, r *http.Request) {
+	if !getOnly(w, r) {
+		return
+	}
+	result, err := h.service.Ready(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, result)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) prices(w http.ResponseWriter, r *http.Request) {

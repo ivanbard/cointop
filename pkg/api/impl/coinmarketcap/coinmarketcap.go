@@ -1,6 +1,7 @@
 package coinmarketcap
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -99,22 +100,54 @@ func (s *Service) getPaginatedCoinData(convert string, offset int) ([]apitypes.C
 // GetAllCoinData gets all coin data. Need to paginate through all pages
 func (s *Service) GetAllCoinData(convert string, ch chan []apitypes.Coin) error {
 	go func() {
-		maxPages := 10
 		defer close(ch)
-		for i := 0; i < maxPages; i++ {
-			if i > 0 {
-				time.Sleep(1 * time.Second)
-			}
-
-			coins, err := s.getPaginatedCoinData(convert, i)
-			if err != nil {
+		for result := range s.StreamAllCoinData(context.Background(), convert) {
+			if result.Err != nil {
 				return
 			}
-
-			ch <- coins
+			ch <- result.Coins
 		}
 	}()
 	return nil
+}
+
+// StreamAllCoinData streams pages and reports a fetch or cancellation error.
+func (s *Service) StreamAllCoinData(ctx context.Context, convert string) <-chan apitypes.CoinPageResult {
+	results := make(chan apitypes.CoinPageResult)
+	go func() {
+		defer close(results)
+		const maxPages = 10
+		for i := 0; i < maxPages; i++ {
+			if i > 0 {
+				timer := time.NewTimer(time.Second)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					results <- apitypes.CoinPageResult{Err: ctx.Err()}
+					return
+				case <-timer.C:
+				}
+			}
+			select {
+			case <-ctx.Done():
+				results <- apitypes.CoinPageResult{Err: ctx.Err()}
+				return
+			default:
+			}
+			coins, err := s.getPaginatedCoinData(convert, i)
+			if err != nil {
+				results <- apitypes.CoinPageResult{Err: err}
+				return
+			}
+			select {
+			case results <- apitypes.CoinPageResult{Coins: coins}:
+			case <-ctx.Done():
+				results <- apitypes.CoinPageResult{Err: ctx.Err()}
+				return
+			}
+		}
+	}()
+	return results
 }
 
 // GetCoinData gets all data of a coin.

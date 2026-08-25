@@ -1,6 +1,7 @@
 package marketdata
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +11,39 @@ import (
 	"sync"
 	"time"
 )
+
+func (c *snapshotCache) probe(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	file, err := os.CreateTemp(c.dir, "readiness-*.tmp")
+	if err != nil {
+		return err
+	}
+	name := file.Name()
+	defer os.Remove(name)
+	if _, err := file.Write([]byte("ready")); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	content, err := os.ReadFile(name)
+	if err != nil {
+		return err
+	}
+	if string(content) != "ready" {
+		return errors.New("cache readiness probe mismatch")
+	}
+	return nil
+}
 
 type snapshot struct {
 	Version   int             `json:"version"`

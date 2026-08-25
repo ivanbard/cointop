@@ -13,15 +13,28 @@ import (
 )
 
 type fakeProvider struct {
-	mu     sync.Mutex
-	calls  int
-	fail   bool
-	delay  time.Duration
-	coins  []apitypes.Coin
-	global apitypes.GlobalMarketData
+	mu        sync.Mutex
+	calls     int
+	fail      bool
+	delay     time.Duration
+	coins     []apitypes.Coin
+	global    apitypes.GlobalMarketData
+	pingErr   error
+	pingDelay time.Duration
+	pingCalls int
+	pageErr   error
 }
 
-func (f *fakeProvider) Ping() error { return nil }
+func (f *fakeProvider) Ping() error {
+	f.mu.Lock()
+	f.pingCalls++
+	delay, err := f.pingDelay, f.pingErr
+	f.mu.Unlock()
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+	return err
+}
 func (f *fakeProvider) GetAllCoinData(_ string, ch chan []apitypes.Coin) error {
 	f.record()
 	if f.delay > 0 {
@@ -32,6 +45,32 @@ func (f *fakeProvider) GetAllCoinData(_ string, ch chan []apitypes.Coin) error {
 	}
 	go func() { defer close(ch); ch <- append([]apitypes.Coin(nil), f.coins...) }()
 	return nil
+}
+func (f *fakeProvider) StreamAllCoinData(ctx context.Context, _ string) <-chan apitypes.CoinPageResult {
+	results := make(chan apitypes.CoinPageResult)
+	go func() {
+		defer close(results)
+		f.record()
+		if f.delay > 0 {
+			time.Sleep(f.delay)
+		}
+		if len(f.coins) > 0 {
+			select {
+			case results <- apitypes.CoinPageResult{Coins: append([]apitypes.Coin(nil), f.coins...)}:
+			case <-ctx.Done():
+				results <- apitypes.CoinPageResult{Err: ctx.Err()}
+				return
+			}
+		}
+		if f.pageErr != nil {
+			results <- apitypes.CoinPageResult{Err: f.pageErr}
+			return
+		}
+		if f.fail {
+			results <- apitypes.CoinPageResult{Err: errors.New("offline")}
+		}
+	}()
+	return results
 }
 func (f *fakeProvider) GetCoinGraphData(string, string, string, int64, int64) (apitypes.CoinGraph, error) {
 	f.record()
@@ -305,6 +344,105 @@ func TestProviderFallbackHasExplicitProvenance(t *testing.T) {
 	}
 	if recovered.Meta.Provider != "primary" || recovered.Meta.FallbackUsed {
 		t.Fatalf("recovery metadata: %+v", recovered.Meta)
+	}
+}
+
+func TestPartialPaginationFallsBackWithoutCachingPartialData(t *testing.T) {
+	now := time.Now().UTC()
+	primary := &fakeProvider{coins: []apitypes.Coin{{ID: "partial", Name: "Partial", Rank: 1}}, pageErr: errors.New("page two failed")}
+	fallback := &fakeProvider{coins: []apitypes.Coin{{ID: "bitcoin", Name: "Bitcoin", Symbol: "BTC", Rank: 1}}}
+	service, err := NewServiceWithFallback(primary, fallback, Config{Provider: "primary", FallbackProvider: "secondary", CacheDir: t.TempDir(), Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Coins(context.Background(), "USD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	coins, err := decodeCoins(result.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(coins) != 1 || coins[0].ID != "bitcoin" || !result.Meta.FallbackUsed {
+		t.Fatalf("partial primary escaped: coins=%+v meta=%+v", coins, result.Meta)
+	}
+	second, err := service.Coins(context.Background(), "USD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Meta.CacheStatus != "hit" || primary.callCount() != 2 || fallback.callCount() != 1 {
+		t.Fatalf("unexpected cache/calls: meta=%+v primary=%d fallback=%d", second.Meta, primary.callCount(), fallback.callCount())
+	}
+}
+
+func TestReadinessFallbackMetadataAndProbeCache(t *testing.T) {
+	now := time.Now().UTC()
+	primary := &fakeProvider{pingErr: errors.New("offline")}
+	fallback := &fakeProvider{}
+	service, err := NewServiceWithFallback(primary, fallback, Config{Provider: "primary", FallbackProvider: "secondary", CacheDir: t.TempDir(), Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.Ready(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Meta.Provider != "secondary" || !first.Meta.FallbackUsed || first.Meta.CacheStatus != "miss" {
+		t.Fatalf("first readiness: %+v", first.Meta)
+	}
+	second, err := service.Ready(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Meta.CacheStatus != "hit" || primary.pingCalls != 1 || fallback.pingCalls != 1 {
+		t.Fatalf("cached readiness: %+v ping calls=%d/%d", second.Meta, primary.pingCalls, fallback.pingCalls)
+	}
+}
+
+func TestReadinessHonorsCallerDeadline(t *testing.T) {
+	now := time.Now().UTC()
+	provider := &fakeProvider{pingDelay: time.Second}
+	service := testService(t, provider, &now)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	result, err := service.Ready(ctx)
+	if !errors.Is(err, ErrUnavailable) || time.Since(started) > 300*time.Millisecond {
+		t.Fatalf("result=%+v err=%v elapsed=%s", result, err, time.Since(started))
+	}
+}
+
+func TestReadinessSerializesConcurrentProbesAndExpiresAfterThirtySeconds(t *testing.T) {
+	now := time.Now().UTC()
+	provider := &fakeProvider{pingDelay: 25 * time.Millisecond}
+	service := testService(t, provider, &now)
+	const requests = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, requests)
+	for i := 0; i < requests; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := service.Ready(context.Background())
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if provider.pingCalls != 1 {
+		t.Fatalf("expected one serialized probe, got %d", provider.pingCalls)
+	}
+	now = now.Add(31 * time.Second)
+	if _, err := service.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if provider.pingCalls != 2 {
+		t.Fatalf("expected expired probe to refresh, got %d calls", provider.pingCalls)
 	}
 }
 

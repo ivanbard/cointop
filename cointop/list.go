@@ -1,9 +1,12 @@
 package cointop
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"time"
 
+	"github.com/cointop-sh/cointop/pkg/api"
 	"github.com/cointop-sh/cointop/pkg/api/types"
 	log "github.com/sirupsen/logrus"
 )
@@ -20,7 +23,6 @@ func (ct *Cointop) UpdateCoins() error {
 	defer coinslock.Unlock()
 	cachekey := ct.CacheKey("allCoinsSlugMap")
 
-	var err error
 	var allCoinsSlugMap map[string]types.Coin
 	cached, found := ct.cache.Get(cachekey)
 	if found {
@@ -35,15 +37,17 @@ func (ct *Cointop) UpdateCoins() error {
 	isCoinStructHashChanged := currentCoinHash != ct.config.CoinStructHash
 	if isCacheMissed || isCoinStructHashChanged {
 		log.Debug("UpdateCoins() cache miss or coin struct has changed")
-		ch := make(chan []types.Coin)
-		err = ct.api.GetAllCoinData(ct.State.currencyConversion, ch)
-		if err != nil {
-			return err
+		var coins []types.Coin
+		for result := range api.StreamAllCoinData(context.Background(), ct.api, ct.State.currencyConversion) {
+			if result.Err != nil {
+				return result.Err
+			}
+			coins = append(coins, result.Coins...)
 		}
-
-		for coins := range ch {
-			go ct.processCoins(coins)
+		if len(coins) == 0 {
+			return errors.New("provider returned no coins")
 		}
+		ct.processCoins(coins)
 	} else {
 		ct.processCoinsMap(allCoinsSlugMap)
 	}
@@ -84,8 +88,6 @@ func (ct *Cointop) processCoins(coins []types.Coin) {
 	log.Debug("ProcessCoins()")
 	updatecoinsmux.Lock()
 	defer updatecoinsmux.Unlock()
-
-	ct.CacheAllCoinsSlugMap()
 
 	for _, v := range coins {
 		k := v.Name
@@ -175,6 +177,7 @@ func (ct *Cointop) processCoins(coins []types.Coin) {
 			return true
 		})
 	}
+	ct.CacheAllCoinsSlugMap()
 
 	time.AfterFunc(10*time.Millisecond, func() {
 		ct.Sort(ct.State.viewSorts[ct.State.selectedView], ct.State.coins, true)

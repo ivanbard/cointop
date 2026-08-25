@@ -161,6 +161,7 @@ Local agents can use the same endpoints through their HTTP tool or execute a
 
 ```text
 GET /v1/health
+GET /v1/ready
 GET /v1/prices?coins=btc,eth&currency=USD
 GET /v1/coins?currency=USD&limit=100&offset=0
 GET /v1/coins/{identifier}?currency=USD
@@ -175,6 +176,10 @@ GET /v1/stream/prices?coins=btc,eth&currency=USD&interval=60s
 ```
 
 The complete wire contract is maintained in `docs/openapi.yaml`.
+
+`/v1/health` is a process-liveness check. `/v1/ready` verifies cache
+read/write access and connectivity to the primary or fallback provider; probes
+are bounded to five seconds and their result is reused for thirty seconds.
 
 ## Current boundaries
 

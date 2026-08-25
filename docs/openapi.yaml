@@ -11,7 +11,21 @@ paths:
       operationId: health
       responses:
         "200":
-          description: Daemon readiness without an upstream request.
+          description: Daemon process liveness without dependency probes.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Envelope"}
+  /v1/ready:
+    get:
+      operationId: readiness
+      responses:
+        "200":
+          description: Cache and at least one configured market provider are ready.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Envelope"}
+        "503":
+          description: Cache or all configured market providers are unavailable.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Envelope"}

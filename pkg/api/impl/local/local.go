@@ -66,21 +66,16 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, target 
 
 func (c *Client) Ping() error {
 	var out envelope[marketdata.Health]
-	return c.get(context.Background(), "/v1/health", nil, &out)
+	return c.get(context.Background(), "/v1/ready", nil, &out)
 }
 
 func (c *Client) GetAllCoinData(convert string, ch chan []types.Coin) error {
-	const limit = 500
 	var pages [][]types.Coin
-	for offset := 0; ; offset += limit {
-		var out envelope[page]
-		if err := c.get(context.Background(), "/v1/coins", url.Values{"currency": {convert}, "limit": {fmt.Sprint(limit)}, "offset": {fmt.Sprint(offset)}}, &out); err != nil {
-			return err
+	for result := range c.StreamAllCoinData(context.Background(), convert) {
+		if result.Err != nil {
+			return result.Err
 		}
-		pages = append(pages, out.Data.Items)
-		if offset+len(out.Data.Items) >= out.Data.Total || len(out.Data.Items) == 0 {
-			break
-		}
+		pages = append(pages, result.Coins)
 	}
 	go func() {
 		defer close(ch)
@@ -89,6 +84,32 @@ func (c *Client) GetAllCoinData(convert string, ch chan []types.Coin) error {
 		}
 	}()
 	return nil
+}
+
+// StreamAllCoinData fetches local API pages with cancellation and explicit errors.
+func (c *Client) StreamAllCoinData(ctx context.Context, convert string) <-chan types.CoinPageResult {
+	results := make(chan types.CoinPageResult)
+	go func() {
+		defer close(results)
+		const limit = 500
+		for offset := 0; ; offset += limit {
+			var out envelope[page]
+			if err := c.get(ctx, "/v1/coins", url.Values{"currency": {convert}, "limit": {fmt.Sprint(limit)}, "offset": {fmt.Sprint(offset)}}, &out); err != nil {
+				results <- types.CoinPageResult{Err: err}
+				return
+			}
+			select {
+			case results <- types.CoinPageResult{Coins: out.Data.Items}:
+			case <-ctx.Done():
+				results <- types.CoinPageResult{Err: ctx.Err()}
+				return
+			}
+			if offset+len(out.Data.Items) >= out.Data.Total || len(out.Data.Items) == 0 {
+				break
+			}
+		}
+	}()
+	return results
 }
 
 func (c *Client) GetCoinGraphData(convert, symbol, name string, start, end int64) (types.CoinGraph, error) {
@@ -167,7 +188,10 @@ func (c *Client) GetExchangeRate(from, to string, _ bool) (float64, error) {
 }
 
 func rangeFor(start, end int64) string {
-	if start <= 0 || end <= start {
+	if start == 0 && end > start {
+		return "all"
+	}
+	if start < 0 || end <= start {
 		return "24h"
 	}
 	startTime, endTime := time.Unix(start, 0).UTC(), time.Unix(end, 0).UTC()

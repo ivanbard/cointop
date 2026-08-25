@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -67,7 +68,7 @@ func TestHealthAndJSONNotFound(t *testing.T) {
 		path   string
 		status int
 		key    string
-	}{{"/v1/health", 200, "data"}, {"/unknown", 404, "error"}} {
+	}{{"/v1/health", 200, "data"}, {"/v1/ready", 200, "data"}, {"/unknown", 404, "error"}} {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		handler.ServeHTTP(recorder, request)
@@ -84,6 +85,32 @@ func TestHealthAndJSONNotFound(t *testing.T) {
 		if _, ok := body[tc.key]; !ok {
 			t.Fatalf("%s: missing %s", tc.path, tc.key)
 		}
+	}
+}
+
+type unavailableProvider struct{ handlerProvider }
+
+func (unavailableProvider) Ping() error { return errors.New("offline") }
+
+func TestReadyReturns503WithReadinessMetadata(t *testing.T) {
+	service, err := marketdata.NewService(unavailableProvider{}, marketdata.Config{Provider: "primary", CacheDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	NewHandler(service).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/ready", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Data marketdata.Health `json:"data"`
+		Meta marketdata.Meta   `json:"meta"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Data.Status != "not_ready" || body.Meta.PrimaryProvider != "primary" || body.Meta.CacheStatus != "miss" {
+		t.Fatalf("body=%+v", body)
 	}
 }
 

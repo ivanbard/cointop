@@ -1,6 +1,7 @@
 package local
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,7 @@ func TestClientImplementsProviderSurface(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": data, "meta": map[string]any{"provider": "fake", "fetchedAt": "2026-08-21T01:00:00Z", "expiresAt": "2026-08-21T01:01:00Z", "cacheStatus": "hit", "stale": false}})
 	}
-	mux.HandleFunc("/v1/health", func(w http.ResponseWriter, _ *http.Request) { write(w, map[string]any{"status": "ready"}) })
+	mux.HandleFunc("/v1/ready", func(w http.ResponseWriter, _ *http.Request) { write(w, map[string]any{"status": "ready"}) })
 	mux.HandleFunc("/v1/coins", func(w http.ResponseWriter, _ *http.Request) {
 		write(w, map[string]any{"items": []any{map[string]any{"id": "bitcoin", "name": "Bitcoin", "symbol": "BTC", "price": 42}}, "limit": 500, "offset": 0, "total": 1})
 	})
@@ -87,5 +88,45 @@ func TestRangeForYTD(t *testing.T) {
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if got := rangeFor(start.Unix(), end.Unix()); got != "ytd" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestRangeForEpochIsAll(t *testing.T) {
+	if got := rangeFor(0, time.Now().Unix()); got != "all" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestPaginationReportsLaterPageErrorWithoutLegacyPartialOutput(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		if requests == 2 {
+			http.Error(w, "failed", http.StatusBadGateway)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"items": []any{map[string]any{"id": "bitcoin"}}, "total": 501}, "meta": map[string]any{}})
+	}))
+	defer server.Close()
+	client, err := New(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := client.StreamAllCoinData(context.Background(), "USD")
+	if first := <-results; first.Err != nil || len(first.Coins) != 1 {
+		t.Fatalf("first=%+v", first)
+	}
+	if second := <-results; second.Err == nil {
+		t.Fatal("expected second-page error")
+	}
+	requests = 0
+	pages := make(chan []types.Coin)
+	if err := client.GetAllCoinData("USD", pages); err == nil {
+		t.Fatal("legacy call must return pagination error")
+	}
+	select {
+	case page := <-pages:
+		t.Fatalf("partial legacy page: %+v", page)
+	default:
 	}
 }

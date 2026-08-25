@@ -49,6 +49,10 @@ type Service struct {
 	updatesMu         sync.RWMutex
 	updateSubscribers map[uint64]func(Update)
 	nextSubscriber    uint64
+	readyMu           sync.Mutex
+	readyResult       Result
+	readyErr          error
+	readyExpires      time.Time
 }
 
 func NewService(provider api.Interface, config Config) (*Service, error) {
@@ -107,10 +111,90 @@ func (s *Service) Provider() string { return s.name }
 
 func (s *Service) Health() Result {
 	now := s.now().UTC()
-	return Result{Data: Health{Status: "ready"}, Meta: Meta{
+	return Result{Data: Health{Status: "ok"}, Meta: Meta{
 		Provider: s.name, PrimaryProvider: s.name, FetchedAt: now, ExpiresAt: now,
 		CacheStatus: "hit", Stale: false,
 	}}
+}
+
+// Ready verifies the writable cache and that at least one configured provider
+// responds. Probes are serialized, bounded to five seconds, and cached for 30s.
+func (s *Service) Ready(ctx context.Context) (Result, error) {
+	s.readyMu.Lock()
+	defer s.readyMu.Unlock()
+	now := s.now().UTC()
+	if now.Before(s.readyExpires) {
+		result := s.readyResult
+		result.Meta.CacheStatus = "hit"
+		return result, s.readyErr
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result := Result{Data: Health{Status: "not_ready"}, Meta: Meta{
+		Provider: s.name, PrimaryProvider: s.name, FetchedAt: now,
+		ExpiresAt: now.Add(30 * time.Second), CacheStatus: "miss",
+	}}
+	if err := s.cache.probe(probeCtx); err != nil {
+		s.storeReady(result, fmt.Errorf("%w: cache probe: %v", ErrUnavailable, err))
+		return result, s.readyErr
+	}
+
+	provider, err := s.readyProvider(probeCtx)
+	if err != nil {
+		s.storeReady(result, fmt.Errorf("%w: provider probe: %v", ErrUnavailable, err))
+		return result, s.readyErr
+	}
+	result.Data = Health{Status: "ready"}
+	result.Meta.Provider = provider
+	result.Meta.FallbackUsed = provider != s.name
+	s.storeReady(result, nil)
+	return result, nil
+}
+
+func (s *Service) storeReady(result Result, err error) {
+	s.readyResult, s.readyErr, s.readyExpires = result, err, result.Meta.ExpiresAt
+}
+
+func (s *Service) readyProvider(ctx context.Context) (string, error) {
+	type response struct {
+		name string
+		err  error
+	}
+	count := 1
+	responses := make(chan response, 2)
+	go func() { responses <- response{name: s.name, err: s.provider.Ping()} }()
+	if s.fallback != nil {
+		count++
+		go func() { responses <- response{name: s.fallbackName, err: s.fallback.Ping()} }()
+	}
+	var fallbackOK bool
+	var failures []error
+	for i := 0; i < count; i++ {
+		select {
+		case <-ctx.Done():
+			if fallbackOK {
+				return s.fallbackName, nil
+			}
+			return "", ctx.Err()
+		case response := <-responses:
+			if response.err == nil {
+				if response.name == s.name {
+					return s.name, nil
+				}
+				fallbackOK = true
+				continue
+			}
+			failures = append(failures, fmt.Errorf("%s: %w", response.name, response.err))
+			if fallbackOK {
+				return s.fallbackName, nil
+			}
+		}
+	}
+	if fallbackOK {
+		return s.fallbackName, nil
+	}
+	return "", errors.Join(failures...)
 }
 
 func (s *Service) Prices(ctx context.Context, coins []string, currency string) (Result, error) {
@@ -177,13 +261,12 @@ func (s *Service) notifyUpdate(update Update) {
 func (s *Service) Coins(ctx context.Context, currency string) (Result, error) {
 	currency = normalizeCurrency(currency)
 	return s.cached(ctx, "coins", currency, "all", s.freshTTL, "", func(provider api.Interface) (interface{}, error) {
-		ch := make(chan []apitypes.Coin)
-		if err := provider.GetAllCoinData(currency, ch); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
-		}
 		var coins []apitypes.Coin
-		for page := range ch {
-			coins = append(coins, page...)
+		for result := range api.StreamAllCoinData(ctx, provider, currency) {
+			if result.Err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrUnavailable, result.Err)
+			}
+			coins = append(coins, result.Coins...)
 		}
 		if len(coins) == 0 {
 			return nil, fmt.Errorf("%w: provider returned no coins", ErrUnavailable)
