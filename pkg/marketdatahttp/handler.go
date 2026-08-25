@@ -212,12 +212,8 @@ func (h *Handler) streamPrices(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_input", err.Error())
 		return
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "internal_error", "streaming is unavailable")
-		return
-	}
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	controller := http.NewResponseController(w)
+	_ = controller.SetWriteDeadline(time.Time{})
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -249,8 +245,7 @@ func (h *Handler) streamPrices(w http.ResponseWriter, r *http.Request) {
 		if _, writeErr := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body); writeErr != nil {
 			return false
 		}
-		flusher.Flush()
-		return true
+		return controller.Flush() == nil
 	}
 	if !writePrices() {
 		return
@@ -267,7 +262,9 @@ func (h *Handler) streamPrices(w http.ResponseWriter, r *http.Request) {
 			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
 				return
 			}
-			flusher.Flush()
+			if controller.Flush() != nil {
+				return
+			}
 		case <-pricesTicker.C:
 			if !writePrices() {
 				return

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cointop-sh/cointop/cointop"
+	"github.com/cointop-sh/cointop/pkg/marketdata"
 	"github.com/cointop-sh/cointop/pkg/marketdatahttp"
 	"github.com/cointop-sh/cointop/pkg/marketdatamcp"
 	"github.com/cointop-sh/cointop/pkg/pathutil"
@@ -72,11 +73,8 @@ func APICmd() *cobra.Command {
 				restOptions.Portfolio = portfolioReader
 				mcpOptions.Portfolio = portfolioReader
 			}
-			mux := http.NewServeMux()
-			mux.Handle("/mcp", marketdatamcp.NewHTTPHandlerWithOptions(service, cointop.Version(), mcpOptions))
-			mux.Handle("/", marketdatahttp.NewHandlerWithOptions(service, restOptions))
 			server := &http.Server{
-				Addr: listen, Handler: marketdatahttp.WithRequestLogging(mux, logger),
+				Addr: listen, Handler: newAPIHandler(service, restOptions, mcpOptions, logger),
 				ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
 				WriteTimeout: 0, IdleTimeout: 60 * time.Second,
 			}
@@ -112,4 +110,11 @@ func APICmd() *cobra.Command {
 	command.Flags().DurationVar(&maxStale, "max-stale", 24*time.Hour, "Maximum stale fallback duration")
 	command.Flags().BoolVar(&exposePortfolio, "expose-portfolio", false, "Expose read-only portfolio data for this process")
 	return command
+}
+
+func newAPIHandler(service *marketdata.Service, restOptions marketdatahttp.HandlerOptions, mcpOptions marketdatamcp.Options, logger *log.Logger) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", marketdatamcp.NewHTTPHandlerWithOptions(service, cointop.Version(), mcpOptions))
+	mux.Handle("/", marketdatahttp.NewHandlerWithOptions(service, restOptions))
+	return marketdatahttp.WithRequestLogging(mux, logger)
 }
