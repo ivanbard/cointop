@@ -41,9 +41,10 @@ type Snapshot struct {
 	Currency          string    `json:"currency"`
 	Holdings          []Holding `json:"holdings"`
 	TotalBalance      float64   `json:"totalBalance"`
-	TotalCostBasis    float64   `json:"totalCostBasis"`
-	ProfitLoss        float64   `json:"profitLoss"`
-	ProfitLossPercent float64   `json:"profitLossPercent"`
+	CostBasisComplete bool      `json:"costBasisComplete"`
+	TotalCostBasis    *float64  `json:"totalCostBasis,omitempty"`
+	ProfitLoss        *float64  `json:"profitLoss,omitempty"`
+	ProfitLossPercent *float64  `json:"profitLossPercent,omitempty"`
 }
 
 type entry struct {
@@ -69,7 +70,8 @@ func (s *Service) Load(ctx context.Context, currency string) (marketdata.Result,
 	if err != nil {
 		return marketdata.Result{}, err
 	}
-	snapshot := Snapshot{Currency: currency, Holdings: make([]Holding, 0, len(entries))}
+	snapshot := Snapshot{Currency: currency, Holdings: make([]Holding, 0, len(entries)), CostBasisComplete: true}
+	var totalCostBasis float64
 	var meta marketdata.Meta
 	for _, configured := range entries {
 		coinResult, coinErr := s.market.Coin(ctx, configured.identifier, currency)
@@ -100,9 +102,11 @@ func (s *Service) Load(ctx context.Context, currency string) (marketdata.Result,
 			if holding.CostBasis != 0 {
 				holding.ProfitLossPercent = holding.ProfitLoss / holding.CostBasis * 100
 			}
+		} else {
+			snapshot.CostBasisComplete = false
 		}
 		snapshot.TotalBalance += holding.Balance
-		snapshot.TotalCostBasis += holding.CostBasis
+		totalCostBasis += holding.CostBasis
 		snapshot.Holdings = append(snapshot.Holdings, holding)
 		meta = combineMeta(meta, coinResult.Meta)
 	}
@@ -111,9 +115,15 @@ func (s *Service) Load(ctx context.Context, currency string) (marketdata.Result,
 			snapshot.Holdings[i].Allocation = snapshot.Holdings[i].Balance / snapshot.TotalBalance * 100
 		}
 	}
-	snapshot.ProfitLoss = snapshot.TotalBalance - snapshot.TotalCostBasis
-	if snapshot.TotalCostBasis != 0 {
-		snapshot.ProfitLossPercent = snapshot.ProfitLoss / snapshot.TotalCostBasis * 100
+	if snapshot.CostBasisComplete {
+		profitLoss := snapshot.TotalBalance - totalCostBasis
+		profitLossPercent := float64(0)
+		if totalCostBasis != 0 {
+			profitLossPercent = profitLoss / totalCostBasis * 100
+		}
+		snapshot.TotalCostBasis = &totalCostBasis
+		snapshot.ProfitLoss = &profitLoss
+		snapshot.ProfitLossPercent = &profitLossPercent
 	}
 	sort.SliceStable(snapshot.Holdings, func(i, j int) bool { return snapshot.Holdings[i].Balance > snapshot.Holdings[j].Balance })
 	if len(entries) == 0 {

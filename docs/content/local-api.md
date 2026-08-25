@@ -110,8 +110,12 @@ cointop data portfolio --currency USD
 
 When enabled, `GET /v1/portfolio` returns holdings, quantities, balances,
 allocation, cost basis, and profit/loss using the same market-data freshness
-metadata. Request logs never include portfolio results or quantities. Without
-the flag the route returns `404`.
+metadata. `costBasisComplete` is true only when every holding has a positive
+configured buy price. Aggregate `totalCostBasis`, `profitLoss`, and
+`profitLossPercent` are omitted when it is false; balances and allocations are
+still returned. An empty portfolio is complete and returns zero aggregates.
+Request logs never include portfolio results or quantities. Without the flag
+the route returns `404`.
 
 ## Query with other tools
 

@@ -93,7 +93,10 @@ Run `cointop mcp --expose-portfolio` to register `get_portfolio` and
 `cointop://portfolio` for that process only. There is no persistent or
 environment-variable opt-in. Without the flag, MCP discovery does not reveal
 that the portfolio capability exists. Portfolio arguments, quantities, and
-results are never logged.
+results are never logged. Portfolio results include `costBasisComplete`;
+aggregate cost basis and profit/loss fields are present only when it is true.
+Balances and allocations remain available for incomplete cost-basis data, and
+an empty portfolio is complete with zero aggregates.
 
 Use `--fallback-api` with either `cointop mcp` or `cointop api` to configure one
 ordered secondary provider. Fallback results carry explicit provider provenance
