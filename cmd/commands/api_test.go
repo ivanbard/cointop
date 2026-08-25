@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/cointop-sh/cointop/pkg/api/types"
 	"github.com/cointop-sh/cointop/pkg/marketdata"
@@ -18,6 +20,23 @@ import (
 )
 
 type apiTestProvider struct{}
+
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
 
 func (apiTestProvider) Ping() error { return nil }
 func (apiTestProvider) GetAllCoinData(_ string, ch chan []types.Coin) error {
@@ -49,24 +68,30 @@ func (apiTestProvider) GetExchangeRate(string, string, bool) (float64, error) {
 	return 1, nil
 }
 
-func newAPIHandlerForTest(t *testing.T) (http.Handler, *bytes.Buffer) {
+func newAPIHandlerForTest(t *testing.T) (http.Handler, *lockedBuffer) {
 	t.Helper()
 	service, err := marketdata.NewService(apiTestProvider{}, marketdata.Config{Provider: "fake", CacheDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var logs bytes.Buffer
+	var logs lockedBuffer
 	logger := log.New()
 	logger.SetOutput(&logs)
 	return newAPIHandler(service, marketdatahttp.HandlerOptions{}, marketdatamcp.Options{}, logger), &logs
 }
 
 func TestAPIHandlerStreamsRESTThroughLogging(t *testing.T) {
-	handler, _ := newAPIHandlerForTest(t)
+	handler, logs := newAPIHandlerForTest(t)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	response, err := http.Get(server.URL + "/v1/stream/prices?coins=btc&currency=USD&interval=15s")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/v1/stream/prices?coins=btc&currency=USD&interval=15s", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +111,15 @@ func TestAPIHandlerStreamsRESTThroughLogging(t *testing.T) {
 	joined := strings.Join(lines, "\n")
 	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/event-stream" || !strings.Contains(joined, "event: prices") {
 		t.Fatalf("unexpected stream: status=%d headers=%v lines=%s", response.StatusCode, response.Header, joined)
+	}
+	cancel()
+	_ = response.Body.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(logs.String(), "path=/v1/stream/prices") || !strings.Contains(logs.String(), "status=200") {
+		if time.Now().After(deadline) {
+			t.Fatalf("SSE completion was not logged with status 200: %s", logs.String())
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

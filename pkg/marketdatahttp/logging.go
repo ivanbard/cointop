@@ -9,7 +9,8 @@ import (
 
 type statusWriter struct {
 	http.ResponseWriter
-	status int
+	status      int
+	wroteHeader bool
 }
 
 func (w *statusWriter) Unwrap() http.ResponseWriter {
@@ -17,8 +18,20 @@ func (w *statusWriter) Unwrap() http.ResponseWriter {
 }
 
 func (w *statusWriter) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
 	w.status = status
+	w.wroteHeader = true
 	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(body []byte) (int, error) {
+	if !w.wroteHeader {
+		w.status = http.StatusOK
+		w.wroteHeader = true
+	}
+	return w.ResponseWriter.Write(body)
 }
 
 func WithRequestLogging(next http.Handler, logger *log.Logger) http.Handler {
