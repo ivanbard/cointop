@@ -35,6 +35,11 @@ func (f *fakeProvider) Ping() error {
 	}
 	return err
 }
+func (f *fakeProvider) pingCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pingCalls
+}
 func (f *fakeProvider) GetAllCoinData(_ string, ch chan []apitypes.Coin) error {
 	f.record()
 	if f.delay > 0 {
@@ -399,6 +404,41 @@ func TestReadinessFallbackMetadataAndProbeCache(t *testing.T) {
 	}
 }
 
+func TestReadinessDoesNotProbeFallbackWhenPrimaryIsHealthy(t *testing.T) {
+	now := time.Now().UTC()
+	primary := &fakeProvider{}
+	fallback := &fakeProvider{}
+	service, err := NewServiceWithFallback(primary, fallback, Config{Provider: "primary", FallbackProvider: "secondary", CacheDir: t.TempDir(), Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Ready(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Meta.Provider != "primary" || result.Meta.FallbackUsed || primary.pingCalls != 1 || fallback.pingCalls != 0 {
+		t.Fatalf("result=%+v ping calls=%d/%d", result.Meta, primary.pingCalls, fallback.pingCalls)
+	}
+}
+
+func TestReadinessGivesFallbackItsOwnTimeout(t *testing.T) {
+	now := time.Now().UTC()
+	primary := &fakeProvider{pingDelay: 80 * time.Millisecond}
+	fallback := &fakeProvider{}
+	service, err := NewServiceWithFallback(primary, fallback, Config{Provider: "primary", FallbackProvider: "secondary", CacheDir: t.TempDir(), Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.readyProbeTimeout = 20 * time.Millisecond
+	result, err := service.Ready(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Meta.Provider != "secondary" || !result.Meta.FallbackUsed || fallback.pingCalls != 1 {
+		t.Fatalf("result=%+v fallback calls=%d", result.Meta, fallback.pingCalls)
+	}
+}
+
 func TestReadinessHonorsCallerDeadline(t *testing.T) {
 	now := time.Now().UTC()
 	provider := &fakeProvider{pingDelay: time.Second}
@@ -443,6 +483,33 @@ func TestReadinessSerializesConcurrentProbesAndExpiresAfterThirtySeconds(t *test
 	}
 	if provider.pingCalls != 2 {
 		t.Fatalf("expected expired probe to refresh, got %d calls", provider.pingCalls)
+	}
+}
+
+func TestReadinessWaiterHonorsCallerDeadline(t *testing.T) {
+	now := time.Now().UTC()
+	provider := &fakeProvider{pingDelay: 100 * time.Millisecond}
+	service := testService(t, provider, &now)
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := service.Ready(context.Background())
+		firstDone <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for provider.pingCallCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("first readiness probe did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if _, err := service.Ready(ctx); !errors.Is(err, ErrUnavailable) || time.Since(started) > 100*time.Millisecond {
+		t.Fatalf("err=%v elapsed=%s", err, time.Since(started))
+	}
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cointop-sh/cointop/pkg/api/pagination"
 	apitypes "github.com/cointop-sh/cointop/pkg/api/types"
 	"github.com/cointop-sh/cointop/pkg/api/util"
 	gecko "github.com/cointop-sh/cointop/pkg/api/vendors/coingecko/v3"
@@ -91,40 +92,9 @@ func (s *Service) GetAllCoinData(convert string, ch chan []apitypes.Coin) error 
 
 // StreamAllCoinData streams pages and reports a fetch or cancellation error.
 func (s *Service) StreamAllCoinData(ctx context.Context, convert string) <-chan apitypes.CoinPageResult {
-	results := make(chan apitypes.CoinPageResult)
-	go func() {
-		defer close(results)
-		for i := 0; i < int(s.maxPages); i++ {
-			if i > 0 {
-				timer := time.NewTimer(time.Second)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					results <- apitypes.CoinPageResult{Err: ctx.Err()}
-					return
-				case <-timer.C:
-				}
-			}
-			select {
-			case <-ctx.Done():
-				results <- apitypes.CoinPageResult{Err: ctx.Err()}
-				return
-			default:
-			}
-			coins, err := s.getPaginatedCoinData(convert, i, []string{})
-			if err != nil {
-				results <- apitypes.CoinPageResult{Err: err}
-				return
-			}
-			select {
-			case results <- apitypes.CoinPageResult{Coins: coins}:
-			case <-ctx.Done():
-				results <- apitypes.CoinPageResult{Err: ctx.Err()}
-				return
-			}
-		}
-	}()
-	return results
+	return pagination.Stream(ctx, int(s.maxPages), time.Second, func(page int) ([]apitypes.Coin, error) {
+		return s.getPaginatedCoinData(convert, page, []string{})
+	})
 }
 
 // GetCoinData gets all data of a coin.

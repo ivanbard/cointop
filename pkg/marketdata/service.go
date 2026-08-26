@@ -50,9 +50,11 @@ type Service struct {
 	updateSubscribers map[uint64]func(Update)
 	nextSubscriber    uint64
 	readyMu           sync.Mutex
+	readyGate         chan struct{}
 	readyResult       Result
 	readyErr          error
 	readyExpires      time.Time
+	readyProbeTimeout time.Duration
 }
 
 func NewService(provider api.Interface, config Config) (*Service, error) {
@@ -104,6 +106,8 @@ func NewServiceWithFallback(provider, fallback api.Interface, config Config) (*S
 		now:               config.Now,
 		flights:           make(map[string]*flight),
 		updateSubscribers: make(map[uint64]func(Update)),
+		readyGate:         make(chan struct{}, 1),
+		readyProbeTimeout: 5 * time.Second,
 	}, nil
 }
 
@@ -121,29 +125,49 @@ func (s *Service) Health() Result {
 // responds. Probes are serialized, bounded to five seconds, and cached for 30s.
 func (s *Service) Ready(ctx context.Context) (Result, error) {
 	s.readyMu.Lock()
-	defer s.readyMu.Unlock()
 	now := s.now().UTC()
 	if now.Before(s.readyExpires) {
 		result := s.readyResult
 		result.Meta.CacheStatus = "hit"
-		return result, s.readyErr
+		err := s.readyErr
+		s.readyMu.Unlock()
+		return result, err
+	}
+	s.readyMu.Unlock()
+
+	select {
+	case s.readyGate <- struct{}{}:
+		defer func() { <-s.readyGate }()
+	case <-ctx.Done():
+		return Result{}, fmt.Errorf("%w: readiness probe: %v", ErrUnavailable, ctx.Err())
 	}
 
-	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	// A concurrent caller may have populated the cache while this caller waited.
+	s.readyMu.Lock()
+	now = s.now().UTC()
+	if now.Before(s.readyExpires) {
+		result := s.readyResult
+		result.Meta.CacheStatus = "hit"
+		err := s.readyErr
+		s.readyMu.Unlock()
+		return result, err
+	}
+	s.readyMu.Unlock()
+
 	result := Result{Data: Health{Status: "not_ready"}, Meta: Meta{
 		Provider: s.name, PrimaryProvider: s.name, FetchedAt: now,
 		ExpiresAt: now.Add(30 * time.Second), CacheStatus: "miss",
 	}}
-	if err := s.cache.probe(probeCtx); err != nil {
+	if err := s.cache.probe(ctx); err != nil {
 		s.storeReady(result, fmt.Errorf("%w: cache probe: %v", ErrUnavailable, err))
-		return result, s.readyErr
+		return result, fmt.Errorf("%w: cache probe: %v", ErrUnavailable, err)
 	}
 
-	provider, err := s.readyProvider(probeCtx)
+	provider, err := s.readyProvider(ctx)
 	if err != nil {
-		s.storeReady(result, fmt.Errorf("%w: provider probe: %v", ErrUnavailable, err))
-		return result, s.readyErr
+		readyErr := fmt.Errorf("%w: provider probe: %v", ErrUnavailable, err)
+		s.storeReady(result, readyErr)
+		return result, readyErr
 	}
 	result.Data = Health{Status: "ready"}
 	result.Meta.Provider = provider
@@ -153,48 +177,40 @@ func (s *Service) Ready(ctx context.Context) (Result, error) {
 }
 
 func (s *Service) storeReady(result Result, err error) {
+	s.readyMu.Lock()
+	defer s.readyMu.Unlock()
 	s.readyResult, s.readyErr, s.readyExpires = result, err, result.Meta.ExpiresAt
 }
 
 func (s *Service) readyProvider(ctx context.Context) (string, error) {
-	type response struct {
-		name string
-		err  error
+	primaryErr := s.pingProvider(ctx, s.provider)
+	if primaryErr == nil {
+		return s.name, nil
 	}
-	count := 1
-	responses := make(chan response, 2)
-	go func() { responses <- response{name: s.name, err: s.provider.Ping()} }()
-	if s.fallback != nil {
-		count++
-		go func() { responses <- response{name: s.fallbackName, err: s.fallback.Ping()} }()
+	if s.fallback == nil {
+		return "", fmt.Errorf("%s: %w", s.name, primaryErr)
 	}
-	var fallbackOK bool
-	var failures []error
-	for i := 0; i < count; i++ {
-		select {
-		case <-ctx.Done():
-			if fallbackOK {
-				return s.fallbackName, nil
-			}
-			return "", ctx.Err()
-		case response := <-responses:
-			if response.err == nil {
-				if response.name == s.name {
-					return s.name, nil
-				}
-				fallbackOK = true
-				continue
-			}
-			failures = append(failures, fmt.Errorf("%s: %w", response.name, response.err))
-			if fallbackOK {
-				return s.fallbackName, nil
-			}
-		}
-	}
-	if fallbackOK {
+	fallbackErr := s.pingProvider(ctx, s.fallback)
+	if fallbackErr == nil {
 		return s.fallbackName, nil
 	}
-	return "", errors.Join(failures...)
+	return "", errors.Join(
+		fmt.Errorf("%s: %w", s.name, primaryErr),
+		fmt.Errorf("%s: %w", s.fallbackName, fallbackErr),
+	)
+}
+
+func (s *Service) pingProvider(ctx context.Context, provider api.Interface) error {
+	probeCtx, cancel := context.WithTimeout(ctx, s.readyProbeTimeout)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- provider.Ping() }()
+	select {
+	case err := <-done:
+		return err
+	case <-probeCtx.Done():
+		return probeCtx.Err()
+	}
 }
 
 func (s *Service) Prices(ctx context.Context, coins []string, currency string) (Result, error) {

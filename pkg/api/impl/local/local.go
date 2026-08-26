@@ -88,7 +88,7 @@ func (c *Client) GetAllCoinData(convert string, ch chan []types.Coin) error {
 
 // StreamAllCoinData fetches local API pages with cancellation and explicit errors.
 func (c *Client) StreamAllCoinData(ctx context.Context, convert string) <-chan types.CoinPageResult {
-	results := make(chan types.CoinPageResult)
+	results := make(chan types.CoinPageResult, 1)
 	go func() {
 		defer close(results)
 		const limit = 500
@@ -98,13 +98,16 @@ func (c *Client) StreamAllCoinData(ctx context.Context, convert string) <-chan t
 				results <- types.CoinPageResult{Err: err}
 				return
 			}
+			if len(out.Data.Items) == 0 {
+				return
+			}
 			select {
 			case results <- types.CoinPageResult{Coins: out.Data.Items}:
 			case <-ctx.Done():
 				results <- types.CoinPageResult{Err: ctx.Err()}
 				return
 			}
-			if offset+len(out.Data.Items) >= out.Data.Total || len(out.Data.Items) == 0 {
+			if offset+len(out.Data.Items) >= out.Data.Total {
 				break
 			}
 		}
