@@ -67,7 +67,11 @@ paths:
       parameters:
         - {$ref: "#/components/parameters/Currency"}
       responses:
-        "200": {$ref: "#/components/responses/Success"}
+        "200":
+          description: A read-only portfolio snapshot with aggregate cost basis only when complete.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PortfolioEnvelope"}
         "503": {$ref: "#/components/responses/Unavailable"}
   /v1/currencies:
     get:
@@ -183,6 +187,43 @@ components:
       properties:
         data: {}
         meta: {$ref: "#/components/schemas/Meta"}
+    PortfolioEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data: {$ref: "#/components/schemas/PortfolioSnapshot"}
+        meta: {$ref: "#/components/schemas/Meta"}
+    PortfolioSnapshot:
+      type: object
+      required: [currency, holdings, totalBalance, costBasisComplete]
+      properties:
+        currency: {type: string}
+        holdings:
+          type: array
+          items: {$ref: "#/components/schemas/PortfolioHolding"}
+        totalBalance: {type: number, format: double}
+        costBasisComplete:
+          type: boolean
+          description: True only when every holding has a configured positive buy price.
+        totalCostBasis: {type: number, format: double}
+        profitLoss: {type: number, format: double}
+        profitLossPercent: {type: number, format: double}
+    PortfolioHolding:
+      type: object
+      required: [id, name, symbol, quantity, price, balance, allocation]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        symbol: {type: string}
+        quantity: {type: number, format: double}
+        price: {type: number, format: double}
+        balance: {type: number, format: double}
+        allocation: {type: number, format: double}
+        buyPrice: {type: number, format: double}
+        buyCurrency: {type: string}
+        costBasis: {type: number, format: double}
+        profitLoss: {type: number, format: double}
+        profitLossPercent: {type: number, format: double}
     Meta:
       type: object
       required: [provider, fetchedAt, expiresAt, cacheStatus, stale]
