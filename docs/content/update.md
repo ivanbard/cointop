@@ -7,10 +7,10 @@ draft: false
 
 ## Go
 
-To update make sure to use the `-u` flag if installed via Go.
+To update an installation made with Go, install the latest version again:
 
 ```bash
-go get -u github.com/cointop-sh/cointop
+go install github.com/cointop-sh/cointop@latest
 ```
 
 ## Homebrew (macOS)

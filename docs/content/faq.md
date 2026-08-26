@@ -575,12 +575,13 @@ Host cointop.sh
   HostKeyAlgorithms=+ssh-rsa
 ```
 
-## Why doesn't the version number work when I install with `go get`?
+## How do I install a specific version with Go?
 
-  The version number is read from the git tag during the build process but this requires the `GO111MODULE` environment variable to be set in order for Go to read the build information:
+  Go 1.25 or newer can install the latest release or a specific tagged release without changing this module's dependencies:
 
   ```bash
-  GO111MODULE=on go get github.com/cointop-sh/cointop
+  go install github.com/cointop-sh/cointop@latest
+  go install github.com/cointop-sh/cointop@v1.6.10
   ```
 
 ## How can I get more information when something is going wrong?
