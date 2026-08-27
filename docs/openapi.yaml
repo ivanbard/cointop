@@ -1,0 +1,248 @@
+openapi: 3.0.3
+info:
+  title: Cointop Local Market Data API
+  version: 1.0.0
+  description: Read-only, loopback-only normalized cryptocurrency market data.
+servers:
+  - url: http://127.0.0.1:7070
+paths:
+  /v1/health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          description: Daemon process liveness without dependency probes.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Envelope"}
+  /v1/ready:
+    get:
+      operationId: readiness
+      responses:
+        "200":
+          description: Cache and at least one configured market provider are ready.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Envelope"}
+        "503":
+          description: Cache or all configured market providers are unavailable.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Envelope"}
+  /v1/prices:
+    get:
+      operationId: prices
+      parameters:
+        - {$ref: "#/components/parameters/Coins"}
+        - {$ref: "#/components/parameters/Currency"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/coins:
+    get:
+      operationId: coins
+      parameters:
+        - {$ref: "#/components/parameters/Currency"}
+        - {name: limit, in: query, schema: {type: integer, default: 100, minimum: 1, maximum: 500}}
+        - {name: offset, in: query, schema: {type: integer, default: 0, minimum: 0}}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/coins/{identifier}:
+    get:
+      operationId: coin
+      parameters:
+        - {name: identifier, in: path, required: true, schema: {type: string}}
+        - {$ref: "#/components/parameters/Currency"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/global:
+    get:
+      operationId: globalMarket
+      parameters:
+        - {$ref: "#/components/parameters/Currency"}
+      responses:
+        "200":
+          description: A read-only portfolio snapshot with aggregate cost basis only when complete.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PortfolioEnvelope"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/currencies:
+    get:
+      operationId: currencies
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+  /v1/charts/coins/{identifier}:
+    get:
+      operationId: coinHistory
+      parameters:
+        - {name: identifier, in: path, required: true, schema: {type: string}}
+        - {$ref: "#/components/parameters/Currency"}
+        - {$ref: "#/components/parameters/Range"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/charts/global:
+    get:
+      operationId: globalHistory
+      parameters:
+        - {$ref: "#/components/parameters/Currency"}
+        - {$ref: "#/components/parameters/Range"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/exchange-rate:
+    get:
+      operationId: exchangeRate
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: string}}
+        - {name: to, in: query, required: true, schema: {type: string}}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/links/coins/{identifier}:
+    get:
+      operationId: coinLink
+      parameters:
+        - {name: identifier, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /v1/portfolio:
+    get:
+      operationId: portfolio
+      description: Available only while the daemon runs with --expose-portfolio.
+      parameters:
+        - {$ref: "#/components/parameters/Currency"}
+      responses:
+        "200": {$ref: "#/components/responses/Success"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /v1/stream/prices:
+    get:
+      operationId: streamPrices
+      description: Loopback Server-Sent Events stream of cached price envelopes.
+      parameters:
+        - {$ref: "#/components/parameters/Coins"}
+        - {$ref: "#/components/parameters/Currency"}
+        - {name: interval, in: query, schema: {type: string, default: 60s, example: 30s}}
+      responses:
+        "200":
+          description: A stream of prices events, safe error events, and heartbeat comments.
+          content:
+            text/event-stream:
+              schema: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+components:
+  parameters:
+    Coins:
+      name: coins
+      in: query
+      required: true
+      description: Comma-separated provider coin names, symbols, or identifiers.
+      schema: {type: string, example: "btc,eth"}
+    Currency:
+      name: currency
+      in: query
+      schema: {type: string, default: USD}
+    Range:
+      name: range
+      in: query
+      schema: {type: string, default: 24h, enum: [24h, 3d, 7d, 1m, 3m, 6m, ytd, 1y, all]}
+  responses:
+    Success:
+      description: Normalized market data.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Envelope"}
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotFound:
+      description: Coin or resource not found.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Unavailable:
+      description: Provider unavailable and no acceptable stale snapshot exists.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+  schemas:
+    Envelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data: {}
+        meta: {$ref: "#/components/schemas/Meta"}
+    PortfolioEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data: {$ref: "#/components/schemas/PortfolioSnapshot"}
+        meta: {$ref: "#/components/schemas/Meta"}
+    PortfolioSnapshot:
+      type: object
+      required: [currency, holdings, totalBalance, costBasisComplete]
+      properties:
+        currency: {type: string}
+        holdings:
+          type: array
+          items: {$ref: "#/components/schemas/PortfolioHolding"}
+        totalBalance: {type: number, format: double}
+        costBasisComplete:
+          type: boolean
+          description: True only when every holding has a configured positive buy price.
+        totalCostBasis: {type: number, format: double}
+        profitLoss: {type: number, format: double}
+        profitLossPercent: {type: number, format: double}
+    PortfolioHolding:
+      type: object
+      required: [id, name, symbol, quantity, price, balance, allocation]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        symbol: {type: string}
+        quantity: {type: number, format: double}
+        price: {type: number, format: double}
+        balance: {type: number, format: double}
+        allocation: {type: number, format: double}
+        buyPrice: {type: number, format: double}
+        buyCurrency: {type: string}
+        costBasis: {type: number, format: double}
+        profitLoss: {type: number, format: double}
+        profitLossPercent: {type: number, format: double}
+    Meta:
+      type: object
+      required: [provider, fetchedAt, expiresAt, cacheStatus, stale]
+      properties:
+        provider: {type: string, enum: [coingecko, coinmarketcap]}
+        primaryProvider: {type: string, enum: [coingecko, coinmarketcap]}
+        fallbackUsed: {type: boolean}
+        currency: {type: string}
+        fetchedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        cacheStatus: {type: string, enum: [miss, hit, stale]}
+        stale: {type: boolean}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}

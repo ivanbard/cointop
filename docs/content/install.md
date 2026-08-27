@@ -9,13 +9,13 @@ There are multiple ways you can install cointop depending on the platform you're
 
 ## From source (always latest and recommended)
 
-Make sure to have [go](https://golang.org/) (1.17+) installed, then do:
+Install [Go](https://go.dev/doc/install) 1.25 or newer, then run:
 
 ```bash
 go install github.com/cointop-sh/cointop@latest
 ```
 
-The cointop executable will be under your GOPATH so make sure `$GOPATH/bin` is added to the `$PATH` variable if not already.
+The executable is written to `$GOBIN`, or to `$GOPATH/bin` when `$GOBIN` is not set. Make sure that directory is on your `PATH`.
 
 Now you can run cointop:
 
@@ -173,10 +173,10 @@ sudo pkg install cointop
 
 ## Windows (PowerShell / WSL)
 
-Install [Go](https://golang.org/doc/install) and [git](https://git-scm.com/download/win), then:
+Install [Go](https://go.dev/doc/install) 1.25 or newer, then run:
 
 ```powershell
-go get -u github.com/cointop-sh/cointop
+go install github.com/cointop-sh/cointop@latest
 ```
 
 You'll need additional font support for Windows. Please see the [wiki](https://github.com/cointop-sh/cointop/wiki/Windows-Command-Prompt-and-WSL-Font-Support) for instructions.

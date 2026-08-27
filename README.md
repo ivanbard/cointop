@@ -70,6 +70,27 @@ Documentation has been moved to [docs.cointop.sh](https://docs.cointop.sh/)
 - **Offline**: Offline cache
 - **Fast**: Fast sort shortcuts, pagination, chart date range change, auto-refresh
 - **Lightweight**: It's very lightweight; can be left running indefinitely
+- **Local API**: Serve normalized, cached market data to local applications and agents over HTTP/JSON
+- **MCP server**: Give local agents typed, read-only market data over stdio or loopback Streamable HTTP
+
+## Local market data API
+
+Cointop can run a read-only API on your machine. The API listens only on a
+loopback address, shares upstream responses across local clients, and can serve
+recent snapshots when the configured provider is temporarily unavailable.
+
+```bash
+cointop api
+cointop data prices --coins btc,eth --currency USD
+```
+
+Core endpoints cover prices, the ranked coin list, individual coins, global
+market data, and supported currencies. See the [local API guide](./docs/content/local-api.md)
+and [OpenAPI contract](./docs/openapi.yaml).
+
+For agent integrations, run `cointop mcp` for zero-setup stdio or connect to
+`http://127.0.0.1:7070/mcp` while `cointop api` is running. See the
+[MCP guide](./docs/content/mcp.md) for Codex, Claude Desktop, and Cursor examples.
 
 ## Contributing
 

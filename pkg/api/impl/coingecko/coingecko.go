@@ -1,6 +1,7 @@
 package coingecko
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cointop-sh/cointop/pkg/api/pagination"
 	apitypes "github.com/cointop-sh/cointop/pkg/api/types"
 	"github.com/cointop-sh/cointop/pkg/api/util"
 	gecko "github.com/cointop-sh/cointop/pkg/api/vendors/coingecko/v3"
@@ -78,21 +80,21 @@ func (s *Service) Ping() error {
 func (s *Service) GetAllCoinData(convert string, ch chan []apitypes.Coin) error {
 	go func() {
 		defer close(ch)
-
-		for i := 0; i < int(s.maxPages); i++ {
-			if i > 0 {
-				time.Sleep(1 * time.Second)
-			}
-
-			coins, err := s.getPaginatedCoinData(convert, i, []string{})
-			if err != nil {
+		for result := range s.StreamAllCoinData(context.Background(), convert) {
+			if result.Err != nil {
 				return
 			}
-
-			ch <- coins
+			ch <- result.Coins
 		}
 	}()
 	return nil
+}
+
+// StreamAllCoinData streams pages and reports a fetch or cancellation error.
+func (s *Service) StreamAllCoinData(ctx context.Context, convert string) <-chan apitypes.CoinPageResult {
+	return pagination.Stream(ctx, int(s.maxPages), time.Second, func(page int) ([]apitypes.Coin, error) {
+		return s.getPaginatedCoinData(convert, page, []string{})
+	})
 }
 
 // GetCoinData gets all data of a coin.

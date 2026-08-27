@@ -30,6 +30,7 @@ func RootCmd() *cobra.Command {
 	colorsDir := os.Getenv("COINTOP_COLORS_DIR")
 	config := os.Getenv("COINTOP_CONFIG")
 	apiChoice := os.Getenv("COINTOP_API")
+	var endpoint string
 	cmcAPIKey := os.Getenv("CMC_PRO_API_KEY")
 	coingeckoAPIKey := os.Getenv("COINGECKO_API_KEY")
 	coingeckoProAPIKey := os.Getenv("COINGECKO_PRO_API_KEY")
@@ -107,6 +108,7 @@ See git.io/cointop for more info.`,
 				CoinGeckoAPIKey:       coingeckoAPIKey,
 				CoinGeckoProAPIKey:    coingeckoProAPIKey,
 				APIChoice:             apiChoice,
+				Endpoint:              endpoint,
 				Colorscheme:           colorscheme,
 				HideMarketbar:         hideMarketbar,
 				HideChart:             hideChart,
@@ -148,6 +150,7 @@ See git.io/cointop for more info.`,
 	rootCmd.Flags().StringVarP(&coingeckoAPIKey, "coingecko-api-key", "", coingeckoAPIKey, "Set the CoinGecko Demo API key")
 	rootCmd.Flags().StringVarP(&coingeckoProAPIKey, "coingecko-pro-api-key", "", coingeckoProAPIKey, "Set the CoinGecko Pro API key")
 	rootCmd.Flags().StringVarP(&apiChoice, "api", "", apiChoice, "API choice. Available choices are \"coinmarketcap\" and \"coingecko\"")
+	rootCmd.Flags().StringVar(&endpoint, "endpoint", "", "Use a loopback cointop API endpoint instead of a direct provider")
 	rootCmd.Flags().StringVarP(&colorscheme, "colorscheme", "", colorscheme, fmt.Sprintf("Colorscheme to use (default \"cointop\").\n%s", cointop.ColorschemeHelpString()))
 	rootCmd.Flags().StringVarP(&cacheDir, "cache-dir", "", cacheDir, fmt.Sprintf("Cache directory (default %s)", cointop.DefaultCacheDir))
 	rootCmd.Flags().StringVarP(&colorsDir, "colors-dir", "", colorsDir, "Colorschemes directory")

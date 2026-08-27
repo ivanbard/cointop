@@ -1,6 +1,7 @@
 package coinmarketcap
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cointop-sh/cointop/pkg/api/pagination"
 	apitypes "github.com/cointop-sh/cointop/pkg/api/types"
 	"github.com/cointop-sh/cointop/pkg/api/util"
 	cmc "github.com/miguelmota/go-coinmarketcap/pro/v1"
@@ -99,22 +101,22 @@ func (s *Service) getPaginatedCoinData(convert string, offset int) ([]apitypes.C
 // GetAllCoinData gets all coin data. Need to paginate through all pages
 func (s *Service) GetAllCoinData(convert string, ch chan []apitypes.Coin) error {
 	go func() {
-		maxPages := 10
 		defer close(ch)
-		for i := 0; i < maxPages; i++ {
-			if i > 0 {
-				time.Sleep(1 * time.Second)
-			}
-
-			coins, err := s.getPaginatedCoinData(convert, i)
-			if err != nil {
+		for result := range s.StreamAllCoinData(context.Background(), convert) {
+			if result.Err != nil {
 				return
 			}
-
-			ch <- coins
+			ch <- result.Coins
 		}
 	}()
 	return nil
+}
+
+// StreamAllCoinData streams pages and reports a fetch or cancellation error.
+func (s *Service) StreamAllCoinData(ctx context.Context, convert string) <-chan apitypes.CoinPageResult {
+	return pagination.Stream(ctx, 10, time.Second, func(page int) ([]apitypes.Coin, error) {
+		return s.getPaginatedCoinData(convert, page)
+	})
 }
 
 // GetCoinData gets all data of a coin.
@@ -126,7 +128,7 @@ func (s *Service) GetCoinData(name string, convert string) (apitypes.Coin, error
 	}
 
 	for _, coin := range coins {
-		if coin.Name == name {
+		if matchesCoinIdentifier(coin, name) {
 			return coin, nil
 		}
 	}
@@ -144,7 +146,7 @@ func (s *Service) GetCoinDataBatch(names []string, convert string) ([]apitypes.C
 
 	for _, coin := range coins {
 		for _, name := range names {
-			if coin.Name == name {
+			if matchesCoinIdentifier(coin, name) {
 				ret = append(ret, coin)
 				break
 			}
@@ -152,6 +154,14 @@ func (s *Service) GetCoinDataBatch(names []string, convert string) ([]apitypes.C
 	}
 
 	return ret, nil
+}
+
+func matchesCoinIdentifier(coin apitypes.Coin, identifier string) bool {
+	identifier = strings.TrimSpace(identifier)
+	return strings.EqualFold(coin.ID, identifier) ||
+		strings.EqualFold(coin.Name, identifier) ||
+		strings.EqualFold(coin.Symbol, identifier) ||
+		strings.EqualFold(coin.Slug, identifier)
 }
 
 // GetCoinGraphData gets coin graph data
@@ -380,7 +390,7 @@ func (s *Service) SupportedCurrencies() []string {
 
 // doReq does HTTP request with client
 func doReq(req *http.Request) ([]byte, error) {
-	client := &http.Client{}
+	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
